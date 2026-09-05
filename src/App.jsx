@@ -3,7 +3,7 @@ import { createWorker } from "tesseract.js";
 import { jsPDF } from "jspdf";
 import "./App.css";
 
-const HISTORY_KEY = "metrocheck_inspections_v7";
+const HISTORY_KEY = "metrocheck_inspections_v8";
 
 const EMPTY_FIELDS = {
   manufacturer: "",
@@ -17,6 +17,11 @@ const EMPTY_FIELDS = {
   consumerCare: "",
   dimensions: "",
   unitSalePrice: "",
+};
+
+const EMPTY_INSPECTOR = {
+  name: "",
+  id: "",
 };
 
 const FIELD_CONFIG = [
@@ -331,7 +336,204 @@ function extractFields(rawText) {
   return fields;
 }
 
-function runCompliance(fields, physicalQuantity) {
+/*
+ * Converts common mass/volume declarations into a numeric base value.
+ * This is used only for a basic demonstration comparison.
+ * It is NOT a substitute for commodity-specific Legal Metrology
+ * verification or statutory tolerance calculations.
+ */
+function parseQuantity(value) {
+  var text = String(value || "")
+    .toLowerCase()
+    .replace(/,/g, "")
+    .trim();
+
+  var match = text.match(
+    /(\d+(?:\.\d+)?)\s*(kg|g|mg|ml|l|litre|liter)\b/i
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  var number = Number(match[1]);
+  var unit = match[2].toLowerCase();
+
+  if (!Number.isFinite(number) || number <= 0) {
+    return null;
+  }
+
+  if (unit === "kg") {
+    return {
+      value: number * 1000,
+      unit: "g",
+      originalValue: number,
+      originalUnit: "kg",
+    };
+  }
+
+  if (unit === "mg") {
+    return {
+      value: number / 1000,
+      unit: "g",
+      originalValue: number,
+      originalUnit: "mg",
+    };
+  }
+
+  if (unit === "g") {
+    return {
+      value: number,
+      unit: "g",
+      originalValue: number,
+      originalUnit: "g",
+    };
+  }
+
+  if (
+    unit === "l" ||
+    unit === "litre" ||
+    unit === "liter"
+  ) {
+    return {
+      value: number * 1000,
+      unit: "ml",
+      originalValue: number,
+      originalUnit: unit,
+    };
+  }
+
+  return {
+    value: number,
+    unit: "ml",
+    originalValue: number,
+    originalUnit: "ml",
+  };
+}
+
+function buildQuantityVerification(fields, physicalQuantity, physicalUnit) {
+  var declared = parseQuantity(fields.netQuantity);
+
+  var measuredNumber = Number(physicalQuantity);
+
+  if (!declared || !Number.isFinite(measuredNumber) || measuredNumber <= 0) {
+    return {
+      available: false,
+      comparable: false,
+      status: "NOT VERIFIED",
+      declared: null,
+      measured: null,
+      difference: null,
+      differencePercent: null,
+      message:
+        "Enter a valid measured quantity and ensure the declared quantity can be interpreted with a supported unit.",
+    };
+  }
+
+  var normalizedMeasured = measuredNumber;
+  var normalizedUnit = String(physicalUnit || "").toLowerCase();
+
+  if (
+    declared.unit === "g" &&
+    normalizedUnit === "kg"
+  ) {
+    normalizedMeasured = measuredNumber * 1000;
+  } else if (
+    declared.unit === "g" &&
+    normalizedUnit === "mg"
+  ) {
+    normalizedMeasured = measuredNumber / 1000;
+  } else if (
+    declared.unit === "ml" &&
+    normalizedUnit === "l"
+  ) {
+    normalizedMeasured = measuredNumber * 1000;
+  }
+
+  var compatible =
+    (declared.unit === "g" &&
+      (normalizedUnit === "g" ||
+        normalizedUnit === "kg" ||
+        normalizedUnit === "mg")) ||
+    (declared.unit === "ml" &&
+      (normalizedUnit === "ml" ||
+        normalizedUnit === "l"));
+
+  if (!compatible) {
+    return {
+      available: true,
+      comparable: false,
+      status: "UNIT REVIEW",
+      declared: declared,
+      measured: {
+        value: measuredNumber,
+        unit: normalizedUnit,
+      },
+      difference: null,
+      differencePercent: null,
+      message:
+        "Declared and measured quantities use incompatible units. Verify the commodity and measurement unit before making a decision.",
+    };
+  }
+
+  var difference = normalizedMeasured - declared.value;
+  var absoluteDifference = Math.abs(difference);
+  var differencePercent =
+    declared.value > 0
+      ? (absoluteDifference / declared.value) * 100
+      : 0;
+
+  /*
+   * Demonstration screening threshold only.
+   * This must not be presented as a universal statutory tolerance.
+   */
+  var demonstrationThreshold =
+    declared.value * 0.02;
+
+  var withinDemonstrationThreshold =
+    absoluteDifference <=
+    demonstrationThreshold;
+
+  var status = withinDemonstrationThreshold
+    ? "PASS"
+    : "REVIEW REQUIRED";
+
+  var message;
+
+  if (difference >= 0) {
+    message =
+      "The inspector-entered quantity is at or above the declared quantity. The comparison is within the prototype's demonstration screening threshold. Apply the applicable commodity-specific legal tolerance before enforcement.";
+  } else if (withinDemonstrationThreshold) {
+    message =
+      "The inspector-entered quantity is slightly below the declared quantity but remains within the prototype's demonstration screening threshold. The applicable commodity-specific legal tolerance must be checked before enforcement.";
+  } else {
+    message =
+      "The inspector-entered quantity is below the declared quantity by " +
+      differencePercent.toFixed(2) +
+      "%. Verify the instrument reading and apply the applicable commodity-specific Legal Metrology tolerance before making an enforcement decision.";
+  }
+
+  return {
+    available: true,
+    comparable: true,
+    status: status,
+    declared: declared,
+    measured: {
+      value: measuredNumber,
+      unit: normalizedUnit,
+    },
+    normalizedMeasured: normalizedMeasured,
+    difference: difference,
+    differencePercent: differencePercent,
+    message: message,
+  };
+}
+
+function runCompliance(
+  fields,
+  physicalQuantity,
+  physicalUnit
+) {
   var results = RULES.map(function (rule) {
     var passed = rule.check(fields);
 
@@ -348,32 +550,40 @@ function runCompliance(fields, physicalQuantity) {
     };
   });
 
-  if (physicalQuantity !== "" && Number(physicalQuantity) > 0) {
-    var declaredNumber = parseFloat(
-      String(fields.netQuantity).replace(/[^\d.]/g, "")
+  var quantityVerification =
+    buildQuantityVerification(
+      fields,
+      physicalQuantity,
+      physicalUnit
     );
 
-    var measuredNumber = Number(physicalQuantity);
+  var quantityRule = results.find(function (item) {
+    return item.id === "quantity";
+  });
 
-    if (declaredNumber > 0 && measuredNumber > 0) {
-      var tolerance = declaredNumber * 0.02;
-      var difference = Math.abs(measuredNumber - declaredNumber);
-
-      var quantityRule = results.find(function (item) {
-        return item.id === "quantity";
-      });
-
-      if (quantityRule) {
-        if (difference <= tolerance) {
-          quantityRule.status = "PASS";
-          quantityRule.message =
-            "Declared quantity is present and the inspector-entered measured quantity is within the demonstration tolerance.";
-        } else {
-          quantityRule.status = "FAIL";
-          quantityRule.message =
-            "Inspector-entered measured quantity differs materially from the declared quantity. Verify the measurement and applicable tolerance before making an enforcement decision.";
-        }
-      }
+  if (
+    quantityRule &&
+    quantityVerification.available
+  ) {
+    if (
+      quantityVerification.status ===
+      "PASS"
+    ) {
+      quantityRule.status = "PASS";
+      quantityRule.message =
+        "Declared quantity is present. " +
+        quantityVerification.message;
+    } else if (
+      quantityVerification.status ===
+      "UNIT REVIEW"
+    ) {
+      quantityRule.status = "FAIL";
+      quantityRule.message =
+        quantityVerification.message;
+    } else {
+      quantityRule.status = "FAIL";
+      quantityRule.message =
+        quantityVerification.message;
     }
   }
 
@@ -389,7 +599,9 @@ function scoreResults(results) {
     return item.status === "PASS";
   }).length;
 
-  return Math.round((passed / results.length) * 100);
+  return Math.round(
+    (passed / results.length) * 100
+  );
 }
 
 function overallStatus(results) {
@@ -453,10 +665,17 @@ function Icon(props) {
 
 function StatusBadge(props) {
   var status = props.status;
-  var normalized = String(status).toLowerCase().replace(/\s/g, "-");
+  var normalized = String(status)
+    .toLowerCase()
+    .replace(/\s/g, "-");
 
   return (
-    <span className={"status-badge status-" + normalized}>
+    <span
+      className={
+        "status-badge status-" +
+        normalized
+      }
+    >
       <span className="status-dot" />
       {status}
     </span>
@@ -467,7 +686,10 @@ function EmptyState(props) {
   return (
     <div className="empty-state">
       <div className="empty-icon">
-        <Icon name={props.icon || "file"} size={28} />
+        <Icon
+          name={props.icon || "file"}
+          size={28}
+        />
       </div>
 
       <h3>{props.title}</h3>
@@ -479,33 +701,74 @@ function EmptyState(props) {
 }
 
 function App() {
-  var [page, setPage] = useState("dashboard");
-  var [darkMode, setDarkMode] = useState(false);
+  var [page, setPage] =
+    useState("dashboard");
 
-  var [inspectionId, setInspectionId] = useState(makeInspectionId());
-  var [imageFile, setImageFile] = useState(null);
-  var [imagePreview, setImagePreview] = useState("");
-  var [ocrText, setOcrText] = useState("");
+  var [darkMode, setDarkMode] =
+    useState(false);
+
+  var [inspectionId, setInspectionId] =
+    useState(makeInspectionId());
+
+  var [imageFile, setImageFile] =
+    useState(null);
+
+  var [imagePreview, setImagePreview] =
+    useState("");
+
+  var [ocrText, setOcrText] =
+    useState("");
+
   var [fields, setFields] = useState(
     Object.assign({}, EMPTY_FIELDS)
   );
 
-  var [physicalQuantity, setPhysicalQuantity] = useState("");
-  var [evidence, setEvidence] = useState([]);
-  var [decision, setDecision] = useState("");
-  var [notes, setNotes] = useState("");
+  var [physicalQuantity, setPhysicalQuantity] =
+    useState("");
 
-  var [scanState, setScanState] = useState("idle");
-  var [scanProgress, setScanProgress] = useState(0);
-  var [toast, setToast] = useState("");
+  var [physicalUnit, setPhysicalUnit] =
+    useState("g");
 
-  var [history, setHistory] = useState([]);
-  var [historySearch, setHistorySearch] = useState("");
-  var [historyFilter, setHistoryFilter] = useState("ALL");
+  var [evidence, setEvidence] =
+    useState([]);
 
-  var [cameraOpen, setCameraOpen] = useState(false);
-  var [cameraError, setCameraError] = useState("");
-  var [cameraReady, setCameraReady] = useState(false);
+  var [decision, setDecision] =
+    useState("");
+
+  var [notes, setNotes] =
+    useState("");
+
+  var [inspector, setInspector] =
+    useState(
+      Object.assign({}, EMPTY_INSPECTOR)
+    );
+
+  var [scanState, setScanState] =
+    useState("idle");
+
+  var [scanProgress, setScanProgress] =
+    useState(0);
+
+  var [toast, setToast] =
+    useState("");
+
+  var [history, setHistory] =
+    useState([]);
+
+  var [historySearch, setHistorySearch] =
+    useState("");
+
+  var [historyFilter, setHistoryFilter] =
+    useState("ALL");
+
+  var [cameraOpen, setCameraOpen] =
+    useState(false);
+
+  var [cameraError, setCameraError] =
+    useState("");
+
+  var [cameraReady, setCameraReady] =
+    useState(false);
 
   var videoRef = useRef(null);
   var streamRef = useRef(null);
@@ -513,20 +776,29 @@ function App() {
   useEffect(function () {
     try {
       var saved = JSON.parse(
-        localStorage.getItem(HISTORY_KEY) || "[]"
+        localStorage.getItem(HISTORY_KEY) ||
+          "[]"
       );
 
       if (Array.isArray(saved)) {
         setHistory(saved);
+      } else {
+        setHistory([]);
       }
     } catch (error) {
+      console.error(error);
       setHistory([]);
     }
   }, []);
 
-  useEffect(function () {
-    document.body.className = darkMode ? "dark-mode" : "";
-  }, [darkMode]);
+  useEffect(
+    function () {
+      document.body.className = darkMode
+        ? "dark-mode"
+        : "";
+    },
+    [darkMode]
+  );
 
   useEffect(
     function () {
@@ -547,15 +819,53 @@ function App() {
 
   useEffect(function () {
     return function () {
-      stopCamera();
+      if (streamRef.current) {
+        streamRef.current
+          .getTracks()
+          .forEach(function (track) {
+            track.stop();
+          });
+
+        streamRef.current = null;
+      }
+
+      if (
+        videoRef.current
+      ) {
+        videoRef.current.srcObject =
+          null;
+      }
     };
   }, []);
 
   var results = useMemo(
     function () {
-      return runCompliance(fields, physicalQuantity);
+      return runCompliance(
+        fields,
+        physicalQuantity,
+        physicalUnit
+      );
     },
-    [fields, physicalQuantity]
+    [
+      fields,
+      physicalQuantity,
+      physicalUnit,
+    ]
+  );
+
+  var quantityVerification = useMemo(
+    function () {
+      return buildQuantityVerification(
+        fields,
+        physicalQuantity,
+        physicalUnit
+      );
+    },
+    [
+      fields,
+      physicalQuantity,
+      physicalUnit,
+    ]
   );
 
   var score = useMemo(
@@ -572,43 +882,61 @@ function App() {
     [results]
   );
 
-  var passedCount = results.filter(function (item) {
-    return item.status === "PASS";
-  }).length;
+  var passedCount =
+    results.filter(function (item) {
+      return item.status === "PASS";
+    }).length;
 
-  var failedCount = results.filter(function (item) {
-    return item.status === "FAIL";
-  }).length;
+  var failedCount =
+    results.filter(function (item) {
+      return item.status === "FAIL";
+    }).length;
 
   var filteredHistory = useMemo(
     function () {
-      return history.filter(function (item) {
-        var search = historySearch.toLowerCase();
+      return history.filter(
+        function (item) {
+          var search =
+            historySearch.toLowerCase();
 
-        var matchesSearch =
-          !search ||
-          (
-            String(item.id || "") +
-            " " +
-            String(item.productName || "") +
-            " " +
-            String(item.status || "")
-          )
-            .toLowerCase()
-            .includes(search);
+          var matchesSearch =
+            !search ||
+            (
+              String(item.id || "") +
+              " " +
+              String(
+                item.productName || ""
+              ) +
+              " " +
+              String(
+                item.status || ""
+              )
+            )
+              .toLowerCase()
+              .includes(search);
 
-        var matchesFilter =
-          historyFilter === "ALL" ||
-          item.status === historyFilter;
+          var matchesFilter =
+            historyFilter === "ALL" ||
+            item.status ===
+              historyFilter;
 
-        return matchesSearch && matchesFilter;
-      });
+          return (
+            matchesSearch &&
+            matchesFilter
+          );
+        }
+      );
     },
-    [history, historySearch, historyFilter]
+    [
+      history,
+      historySearch,
+      historyFilter,
+    ]
   );
 
   function navigate(target) {
     setPage(target);
+
     window.scrollTo({
       top: 0,
       behavior: "smooth",
@@ -622,17 +950,43 @@ function App() {
   function resetInspection() {
     stopCamera();
 
-    setInspectionId(makeInspectionId());
+    if (
+      imagePreview &&
+      imagePreview.startsWith("blob:")
+    ) {
+      URL.revokeObjectURL(
+        imagePreview
+      );
+    }
+
+    setInspectionId(
+      makeInspectionId()
+    );
+
     setImageFile(null);
     setImagePreview("");
     setOcrText("");
-    setFields(Object.assign({}, EMPTY_FIELDS));
+    setFields(
+      Object.assign({}, EMPTY_FIELDS)
+    );
+
     setPhysicalQuantity("");
+    setPhysicalUnit("g");
+
     setEvidence([]);
     setDecision("");
     setNotes("");
+
+    setInspector(
+      Object.assign(
+        {},
+        EMPTY_INSPECTOR
+      )
+    );
+
     setScanState("idle");
     setScanProgress(0);
+
     setCameraOpen(false);
     setCameraError("");
     setCameraReady(false);
@@ -649,66 +1003,96 @@ function App() {
     }
 
     if (!file.type.startsWith("image/")) {
-      showToast("Please select an image file.");
+      showToast(
+        "Please select an image file."
+      );
       return;
     }
 
-    if (imagePreview && imagePreview.startsWith("blob:")) {
-      URL.revokeObjectURL(imagePreview);
+    if (
+      imagePreview &&
+      imagePreview.startsWith("blob:")
+    ) {
+      URL.revokeObjectURL(
+        imagePreview
+      );
     }
 
+    var previewUrl =
+      URL.createObjectURL(file);
+
     setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+    setImagePreview(previewUrl);
+
     setScanState("ready");
     setScanProgress(0);
     setOcrText("");
-    setFields(Object.assign({}, EMPTY_FIELDS));
 
-    showToast("Product image loaded.");
+    setFields(
+      Object.assign({}, EMPTY_FIELDS)
+    );
+
+    showToast(
+      "Product image loaded."
+    );
   }
 
   async function openCamera() {
     setCameraError("");
     setCameraReady(false);
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices
+        .getUserMedia
+    ) {
       setCameraError(
         "Camera access is not supported by this browser."
       );
+
       setCameraOpen(true);
       return;
     }
 
     try {
-      var stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: {
-            ideal: "environment",
-          },
-          width: {
-            ideal: 1920,
-          },
-          height: {
-            ideal: 1080,
-          },
-        },
-        audio: false,
-      });
+      var stream =
+        await navigator.mediaDevices.getUserMedia(
+          {
+            video: {
+              facingMode: {
+                ideal: "environment",
+              },
+              width: {
+                ideal: 1920,
+              },
+              height: {
+                ideal: 1080,
+              },
+            },
+            audio: false,
+          }
+        );
 
       streamRef.current = stream;
+
       setCameraOpen(true);
 
       setTimeout(function () {
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject =
+            stream;
 
           videoRef.current
             .play()
             .then(function () {
-              setCameraReady(true);
+              setCameraReady(
+                true
+              );
             })
             .catch(function () {
-              setCameraReady(true);
+              setCameraReady(
+                true
+              );
             });
         }
       }, 100);
@@ -716,6 +1100,7 @@ function App() {
       console.error(error);
 
       setCameraOpen(true);
+
       setCameraError(
         "Camera permission was denied or the camera could not be opened."
       );
@@ -724,15 +1109,18 @@ function App() {
 
   function stopCamera() {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(function (track) {
-        track.stop();
-      });
+      streamRef.current
+        .getTracks()
+        .forEach(function (track) {
+          track.stop();
+        });
 
       streamRef.current = null;
     }
 
     if (videoRef.current) {
-      videoRef.current.srcObject = null;
+      videoRef.current.srcObject =
+        null;
     }
 
     setCameraReady(false);
@@ -740,63 +1128,120 @@ function App() {
 
   function closeCamera() {
     stopCamera();
+
     setCameraOpen(false);
     setCameraError("");
   }
 
   function capturePhoto() {
-    var video = videoRef.current;
+    var video =
+      videoRef.current;
 
-    if (!video || !cameraReady) {
-      showToast("Camera is not ready yet.");
+    if (
+      !video ||
+      !cameraReady
+    ) {
+      showToast(
+        "Camera is not ready yet."
+      );
       return;
     }
 
-    var width = video.videoWidth;
-    var height = video.videoHeight;
+    var width =
+      video.videoWidth;
+
+    var height =
+      video.videoHeight;
 
     if (!width || !height) {
-      showToast("Camera image is not available yet.");
+      showToast(
+        "Camera image is not available yet."
+      );
       return;
     }
 
-    var canvas = document.createElement("canvas");
+    var canvas =
+      document.createElement(
+        "canvas"
+      );
 
     canvas.width = width;
     canvas.height = height;
 
-    var context = canvas.getContext("2d");
+    var context =
+      canvas.getContext("2d");
 
-    context.drawImage(video, 0, 0, width, height);
+    if (!context) {
+      showToast(
+        "Could not prepare camera capture."
+      );
+      return;
+    }
+
+    context.drawImage(
+      video,
+      0,
+      0,
+      width,
+      height
+    );
 
     canvas.toBlob(
       function (blob) {
         if (!blob) {
-          showToast("Could not capture the camera image.");
+          showToast(
+            "Could not capture the camera image."
+          );
           return;
         }
 
         var file = new File(
           [blob],
-          "MetroCheck-Capture-" + Date.now() + ".jpg",
+          "MetroCheck-Capture-" +
+            Date.now() +
+            ".jpg",
           {
             type: "image/jpeg",
           }
         );
 
-        if (imagePreview && imagePreview.startsWith("blob:")) {
-          URL.revokeObjectURL(imagePreview);
+        if (
+          imagePreview &&
+          imagePreview.startsWith(
+            "blob:"
+          )
+        ) {
+          URL.revokeObjectURL(
+            imagePreview
+          );
         }
 
+        var previewUrl =
+          URL.createObjectURL(
+            file
+          );
+
         setImageFile(file);
-        setImagePreview(URL.createObjectURL(file));
+        setImagePreview(
+          previewUrl
+        );
+
         setScanState("ready");
         setScanProgress(0);
         setOcrText("");
-        setFields(Object.assign({}, EMPTY_FIELDS));
+
+        setFields(
+          Object.assign(
+            {},
+            EMPTY_FIELDS
+          )
+        );
 
         closeCamera();
-        showToast("Photo captured successfully.");
+
+        showToast(
+          "Photo captured successfully."
+        );
       },
       "image/jpeg",
       0.92
@@ -805,7 +1250,9 @@ function App() {
 
   async function runOCR() {
     if (!imagePreview) {
-      showToast("Capture or upload a product image first.");
+      showToast(
+        "Capture or upload a product image first."
+      );
       return;
     }
 
@@ -816,28 +1263,38 @@ function App() {
     var worker = null;
 
     try {
-      worker = await createWorker("eng");
+      worker =
+        await createWorker("eng");
 
       setScanProgress(25);
 
-      var response = await worker.recognize(imagePreview);
+      var response =
+        await worker.recognize(
+          imagePreview
+        );
 
       setScanProgress(80);
 
       var text = normalizeText(
-        response && response.data ? response.data.text : ""
+        response &&
+          response.data
+          ? response.data.text
+          : ""
       );
 
       setOcrText(text);
 
-      var extracted = extractFields(text);
+      var extracted =
+        extractFields(text);
 
       setFields(extracted);
 
       setScanProgress(100);
       setScanState("complete");
 
-      showToast("OCR scan completed successfully.");
+      showToast(
+        "OCR scan completed successfully."
+      );
     } catch (error) {
       console.error(error);
 
@@ -857,120 +1314,254 @@ function App() {
     }
   }
 
-  function updateField(key, value) {
-    setFields(function (previous) {
-      return Object.assign({}, previous, {
-        [key]: value,
-      });
+  function updateField(
+    key,
+    value
+  ) {
+    setFields(function (
+      previous
+    ) {
+      return Object.assign(
+        {},
+        previous,
+        {
+          [key]: value,
+        }
+      );
+    });
+  }
+
+  function updateInspector(
+    key,
+    value
+  ) {
+    setInspector(function (
+      previous
+    ) {
+      return Object.assign(
+        {},
+        previous,
+        {
+          [key]: value,
+        }
+      );
     });
   }
 
   function handleEvidence(files) {
-    var selected = Array.from(files || []);
+    var selected =
+      Array.from(files || []);
 
-    var list = selected.map(function (file) {
-      return {
-        id:
-          file.name +
-          "-" +
-          file.lastModified +
-          "-" +
-          Math.random(),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-      };
-    });
+    var list =
+      selected.map(function (
+        file
+      ) {
+        return {
+          id:
+            file.name +
+            "-" +
+            file.lastModified +
+            "-" +
+            Math.random(),
 
-    setEvidence(function (previous) {
-      return previous.concat(list);
+          name: file.name,
+
+          size: file.size,
+
+          type: file.type,
+
+          addedAt:
+            Date.now(),
+        };
+      });
+
+    setEvidence(function (
+      previous
+    ) {
+      return previous.concat(
+        list
+      );
     });
 
     if (list.length) {
       showToast(
-        String(list.length) + " evidence file(s) added."
+        String(list.length) +
+          " evidence file(s) added."
       );
     }
   }
 
   function removeEvidence(id) {
-    setEvidence(function (previous) {
-      return previous.filter(function (item) {
-        return item.id !== id;
-      });
+    setEvidence(function (
+      previous
+    ) {
+      return previous.filter(
+        function (item) {
+          return item.id !== id;
+        }
+      );
     });
   }
 
   function saveInspection() {
-    var finalResults = runCompliance(
-      fields,
-      physicalQuantity
-    );
+    var finalResults =
+      runCompliance(
+        fields,
+        physicalQuantity,
+        physicalUnit
+      );
 
-    var finalScore = scoreResults(finalResults);
+    var finalScore =
+      scoreResults(
+        finalResults
+      );
+
+    var automatedStatus =
+      overallStatus(
+        finalResults
+      );
 
     var finalStatus =
-      decision || overallStatus(finalResults);
+      decision ||
+      automatedStatus;
 
     var record = {
       id: inspectionId,
+
       productName:
-        fields.productName || "Unknown commodity",
-      imagePreview: imagePreview,
-      fields: fields,
-      ocrText: ocrText,
-      physicalQuantity: physicalQuantity,
-      evidence: evidence,
-      decision: finalStatus,
-      status: finalStatus,
-      score: finalScore,
-      ruleResults: finalResults,
-      notes: notes,
-      date: formatDate(),
-      time: formatTime(),
-      timestamp: Date.now(),
+        fields.productName ||
+        "Unknown commodity",
+
+      imagePreview:
+        imagePreview,
+
+      fields:
+        Object.assign({}, fields),
+
+      ocrText:
+        ocrText,
+
+      physicalQuantity:
+        physicalQuantity,
+
+      physicalUnit:
+        physicalUnit,
+
+      quantityVerification:
+        quantityVerification,
+
+      inspector:
+        Object.assign(
+          {},
+          inspector
+        ),
+
+      evidence:
+        evidence,
+
+      decision:
+        finalStatus,
+
+      status:
+        finalStatus,
+
+      automatedStatus:
+        automatedStatus,
+
+      score:
+        finalScore,
+
+      ruleResults:
+        finalResults,
+
+      notes:
+        notes,
+
+      date:
+        formatDate(),
+
+      time:
+        formatTime(),
+
+      timestamp:
+        Date.now(),
     };
 
     var next = [
       record,
-      ...history.filter(function (item) {
-        return item.id !== inspectionId;
-      }),
+      ...history.filter(
+        function (item) {
+          return (
+            item.id !==
+            inspectionId
+          );
+        }
+      ),
     ];
 
     setHistory(next);
 
-    localStorage.setItem(
-      HISTORY_KEY,
-      JSON.stringify(next)
-    );
+    try {
+      localStorage.setItem(
+        HISTORY_KEY,
+        JSON.stringify(next)
+      );
+    } catch (error) {
+      console.error(error);
+
+      showToast(
+        "Inspection was processed, but browser storage is full."
+      );
+
+      return;
+    }
 
     setDecision(finalStatus);
 
-    showToast("Inspection saved to history.");
+    showToast(
+      "Inspection saved to history."
+    );
 
     navigate("history");
   }
 
   function loadInspection(record) {
-    setInspectionId(record.id);
+    setInspectionId(
+      record.id ||
+        makeInspectionId()
+    );
 
-    setImagePreview(record.imagePreview || "");
+    setImagePreview(
+      record.imagePreview || ""
+    );
 
     setImageFile(null);
 
     setFields(
       record.fields ||
-        Object.assign({}, EMPTY_FIELDS)
+        Object.assign(
+          {},
+          EMPTY_FIELDS
+        )
     );
 
-    setOcrText(record.ocrText || "");
+    setOcrText(
+      record.ocrText || ""
+    );
 
     setPhysicalQuantity(
-      record.physicalQuantity || ""
+      record.physicalQuantity ||
+        ""
     );
 
-    setEvidence(record.evidence || []);
+    setPhysicalUnit(
+      record.physicalUnit ||
+        "g"
+    );
+
+    setEvidence(
+      record.evidence || []
+    );
 
     setDecision(
       record.decision ||
@@ -978,7 +1569,17 @@ function App() {
         ""
     );
 
-    setNotes(record.notes || "");
+    setNotes(
+      record.notes || ""
+    );
+
+    setInspector(
+      record.inspector ||
+        Object.assign(
+          {},
+          EMPTY_INSPECTOR
+        )
+    );
 
     setScanState(
       record.imagePreview
@@ -987,25 +1588,36 @@ function App() {
     );
 
     setScanProgress(
-      record.imagePreview ? 100 : 0
+      record.imagePreview
+        ? 100
+        : 0
     );
 
     navigate("scanner");
   }
 
   function deleteInspection(id) {
-    var next = history.filter(function (item) {
-      return item.id !== id;
-    });
+    var next =
+      history.filter(
+        function (item) {
+          return item.id !== id;
+        }
+      );
 
     setHistory(next);
 
-    localStorage.setItem(
-      HISTORY_KEY,
-      JSON.stringify(next)
-    );
+    try {
+      localStorage.setItem(
+        HISTORY_KEY,
+        JSON.stringify(next)
+      );
+    } catch (error) {
+      console.error(error);
+    }
 
-    showToast("Inspection removed.");
+    showToast(
+      "Inspection removed."
+    );
   }
 
   function clearHistory() {
@@ -1013,9 +1625,10 @@ function App() {
       return;
     }
 
-    var confirmed = window.confirm(
-      "Delete all saved inspection history?"
-    );
+    var confirmed =
+      window.confirm(
+        "Delete all saved inspection history?"
+      );
 
     if (!confirmed) {
       return;
@@ -1023,25 +1636,78 @@ function App() {
 
     setHistory([]);
 
-    localStorage.removeItem(HISTORY_KEY);
+    localStorage.removeItem(
+      HISTORY_KEY
+    );
 
-    showToast("Inspection history cleared.");
+    showToast(
+      "Inspection history cleared."
+    );
   }
 
   function generatePDF() {
-    var doc = new jsPDF();
+    var doc =
+      new jsPDF();
 
     var margin = 16;
     var y = 18;
 
+    function ensureSpace(
+      required
+    ) {
+      if (
+        y + required >
+        275
+      ) {
+        doc.addPage();
+        y = 20;
+      }
+    }
+
+    function addWrappedText(
+      text,
+      x,
+      width,
+      lineHeight
+    ) {
+      var lines =
+        doc.splitTextToSize(
+          String(text || ""),
+          width
+        );
+
+      doc.text(
+        lines,
+        x,
+        y
+      );
+
+      y +=
+        lines.length *
+          lineHeight;
+
+      return lines;
+    }
+
     doc.setFontSize(22);
-    doc.setFont("helvetica", "bold");
-    doc.text("METROCHECK", margin, y);
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    doc.text(
+      "METROCHECK",
+      margin,
+      y
+    );
 
     y += 8;
 
     doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
+    doc.setFont(
+      "helvetica",
+      "normal"
+    );
 
     doc.text(
       "Packaged Commodity Legal Metrology Compliance Report",
@@ -1054,7 +1720,8 @@ function App() {
     doc.setFontSize(11);
 
     doc.text(
-      "Inspection ID: " + inspectionId,
+      "Inspection ID: " +
+        inspectionId,
       margin,
       y
     );
@@ -1062,7 +1729,8 @@ function App() {
     y += 7;
 
     doc.text(
-      "Date: " + formatDate(),
+      "Date: " +
+        formatDate(),
       margin,
       y
     );
@@ -1070,27 +1738,36 @@ function App() {
     y += 7;
 
     doc.text(
-      "Time: " + formatTime(),
+      "Time: " +
+        formatTime(),
       margin,
       y
     );
 
     y += 12;
 
-    doc.setFont("helvetica", "bold");
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
+
     doc.text(
       "Inspection Summary",
       margin,
       y
     );
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont(
+      "helvetica",
+      "normal"
+    );
 
     y += 8;
 
     doc.text(
       "Commodity: " +
-        (fields.productName || "Not identified"),
+        (fields.productName ||
+          "Not identified"),
       margin,
       y
     );
@@ -1098,7 +1775,9 @@ function App() {
     y += 7;
 
     doc.text(
-      "Compliance Score: " + score + "%",
+      "Compliance Score: " +
+        score +
+        "%",
       margin,
       y
     );
@@ -1106,7 +1785,8 @@ function App() {
     y += 7;
 
     doc.text(
-      "System Status: " + status,
+      "Automated Screening Status: " +
+        status,
       margin,
       y
     );
@@ -1115,101 +1795,257 @@ function App() {
 
     doc.text(
       "Inspector Decision: " +
-        (decision || "Pending verification"),
+        (decision ||
+          "Pending verification"),
       margin,
       y
     );
 
     y += 12;
 
-    doc.setFont("helvetica", "bold");
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    doc.text(
+      "Inspector Details",
+      margin,
+      y
+    );
+
+    doc.setFont(
+      "helvetica",
+      "normal"
+    );
+
+    y += 8;
+
+    doc.text(
+      "Inspector Name: " +
+        (inspector.name ||
+          "Not provided"),
+      margin,
+      y
+    );
+
+    y += 7;
+
+    doc.text(
+      "Inspector ID: " +
+        (inspector.id ||
+          "Not provided"),
+      margin,
+      y
+    );
+
+    y += 12;
+
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
+
     doc.text(
       "Declaration Analysis",
       margin,
       y
     );
 
-    doc.setFont("helvetica", "normal");
+    doc.setFont(
+      "helvetica",
+      "normal"
+    );
 
     y += 8;
 
-    results.forEach(function (rule, index) {
-      if (y > 270) {
-        doc.addPage();
-        y = 20;
+    results.forEach(
+      function (
+        rule,
+        index
+      ) {
+        ensureSpace(35);
+
+        doc.setFont(
+          "helvetica",
+          "bold"
+        );
+
+        doc.text(
+          String(index + 1) +
+            ". " +
+            rule.title,
+          margin,
+          y
+        );
+
+        y += 6;
+
+        doc.setFont(
+          "helvetica",
+          "normal"
+        );
+
+        doc.text(
+          "Status: " +
+            rule.status,
+          margin + 4,
+          y
+        );
+
+        y += 6;
+
+        var lines =
+          doc.splitTextToSize(
+            rule.message,
+            170
+          );
+
+        doc.text(
+          lines,
+          margin + 4,
+          y
+        );
+
+        y +=
+          lines.length *
+            5 +
+          5;
       }
+    );
 
-      doc.setFont("helvetica", "bold");
+    ensureSpace(45);
+
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    doc.text(
+      "Physical Verification",
+      margin,
+      y
+    );
+
+    doc.setFont(
+      "helvetica",
+      "normal"
+    );
+
+    y += 8;
+
+    doc.text(
+      "Declared quantity: " +
+        (fields.netQuantity ||
+          "Not identified"),
+      margin,
+      y
+    );
+
+    y += 7;
+
+    doc.text(
+      "Measured quantity: " +
+        (physicalQuantity
+          ? physicalQuantity +
+            " " +
+            physicalUnit
+          : "Not entered"),
+      margin,
+      y
+    );
+
+    y += 7;
+
+    doc.text(
+      "Quantity verification: " +
+        quantityVerification.status,
+      margin,
+      y
+    );
+
+    y += 7;
+
+    if (
+      quantityVerification.message
+    ) {
+      var quantityLines =
+        doc.splitTextToSize(
+          quantityVerification.message,
+          170
+        );
 
       doc.text(
-        String(index + 1) +
-          ". " +
-          rule.title,
+        quantityLines,
         margin,
         y
       );
 
-      y += 6;
-
-      doc.setFont("helvetica", "normal");
-
-      doc.text(
-        "Status: " + rule.status,
-        margin + 4,
-        y
-      );
-
-      y += 6;
-
-      var lines = doc.splitTextToSize(
-        rule.message,
-        170
-      );
-
-      doc.text(
-        lines,
-        margin + 4,
-        y
-      );
-
-      y += lines.length * 5 + 5;
-    });
-
-    if (physicalQuantity) {
-      if (y > 260) {
-        doc.addPage();
-        y = 20;
-      }
-
-      doc.setFont("helvetica", "bold");
-
-      doc.text(
-        "Physical Verification",
-        margin,
-        y
-      );
-
-      y += 7;
-
-      doc.setFont("helvetica", "normal");
-
-      doc.text(
-        "Inspector-entered measured quantity: " +
-          physicalQuantity,
-        margin,
-        y
-      );
-
-      y += 10;
+      y +=
+        quantityLines.length *
+        5;
     }
 
-    if (notes) {
-      if (y > 250) {
-        doc.addPage();
-        y = 20;
-      }
+    y += 8;
 
-      doc.setFont("helvetica", "bold");
+    ensureSpace(45);
+
+    doc.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    doc.text(
+      "Declaration Values",
+      margin,
+      y
+    );
+
+    doc.setFont(
+      "helvetica",
+      "normal"
+    );
+
+    y += 8;
+
+    FIELD_CONFIG.forEach(
+      function (item) {
+        var key = item[0];
+        var label = item[1];
+        var value =
+          fields[key] ||
+          "Not identified";
+
+        ensureSpace(12);
+
+        var valueLines =
+          doc.splitTextToSize(
+            label +
+              ": " +
+              value,
+            175
+          );
+
+        doc.text(
+          valueLines,
+          margin,
+          y
+        );
+
+        y +=
+          valueLines.length *
+          5 +
+          2;
+      }
+    );
+
+    if (notes) {
+      ensureSpace(45);
+
+      doc.setFont(
+        "helvetica",
+        "bold"
+      );
 
       doc.text(
         "Inspector Notes",
@@ -1219,29 +2055,32 @@ function App() {
 
       y += 7;
 
-      doc.setFont("helvetica", "normal");
+      doc.setFont(
+        "helvetica",
+        "normal"
+      );
 
-      var noteLines = doc.splitTextToSize(
+      addWrappedText(
         notes,
-        175
-      );
-
-      doc.text(
-        noteLines,
         margin,
-        y
+        175,
+        5
       );
 
-      y += noteLines.length * 5 + 10;
+      y += 5;
     }
 
     if (evidence.length) {
-      if (y > 250) {
-        doc.addPage();
-        y = 20;
-      }
+      ensureSpace(
+        20 +
+          evidence.length *
+            7
+      );
 
-      doc.setFont("helvetica", "bold");
+      doc.setFont(
+        "helvetica",
+        "bold"
+      );
 
       doc.text(
         "Evidence Files",
@@ -1251,36 +2090,48 @@ function App() {
 
       y += 7;
 
-      doc.setFont("helvetica", "normal");
+      doc.setFont(
+        "helvetica",
+        "normal"
+      );
 
-      evidence.forEach(function (item) {
-        if (y > 275) {
-          doc.addPage();
-          y = 20;
+      evidence.forEach(
+        function (item) {
+          ensureSpace(10);
+
+          doc.text(
+            "• " +
+              item.name,
+            margin,
+            y
+          );
+
+          y += 6;
         }
-
-        doc.text(
-          "• " + item.name,
-          margin,
-          y
-        );
-
-        y += 6;
-      });
+      );
     }
 
-    if (y > 270) {
-      doc.addPage();
-      y = 20;
-    }
+    ensureSpace(35);
 
     doc.setFontSize(8);
-    doc.setFont("helvetica", "italic");
+    doc.setFont(
+      "helvetica",
+      "italic"
+    );
+
+    var footerText =
+      "MetroCheck is a prototype decision-support system. Automated screening assists inspection but does not replace inspector verification. Final enforcement decisions require applicable Legal Metrology rules, commodity-specific requirements, tolerances and competent authority verification.";
+
+    var footerLines =
+      doc.splitTextToSize(
+        footerText,
+        175
+      );
 
     doc.text(
-      "MetroCheck is a prototype decision-support system. Final enforcement decisions remain subject to inspector verification and applicable law.",
+      footerLines,
       margin,
-      285
+      y
     );
 
     doc.save(
@@ -1288,7 +2139,9 @@ function App() {
         "-MetroCheck-Report.pdf"
     );
 
-    showToast("PDF report generated.");
+    showToast(
+      "PDF report generated."
+    );
   }
 
   return (
@@ -1318,16 +2171,21 @@ function App() {
           <button
             className={
               "nav-item " +
-              (page === "dashboard"
+              (page ===
+              "dashboard"
                 ? "active"
                 : "")
             }
             onClick={function () {
-              navigate("dashboard");
+              navigate(
+                "dashboard"
+              );
             }}
           >
             <Icon name="grid" />
-            <span>Dashboard</span>
+            <span>
+              Dashboard
+            </span>
           </button>
 
           <button
@@ -1338,11 +2196,15 @@ function App() {
                 : "")
             }
             onClick={function () {
-              navigate("scanner");
+              navigate(
+                "scanner"
+              );
             }}
           >
             <Icon name="scan" />
-            <span>New Inspection</span>
+            <span>
+              New Inspection
+            </span>
           </button>
 
           <button
@@ -1353,13 +2215,18 @@ function App() {
                 : "")
             }
             onClick={function () {
-              navigate("history");
+              navigate(
+                "history"
+              );
             }}
           >
             <Icon name="history" />
-            <span>Inspection History</span>
+            <span>
+              Inspection History
+            </span>
 
-            {history.length > 0 && (
+            {history.length >
+              0 && (
               <span className="nav-count">
                 {history.length}
               </span>
@@ -1384,14 +2251,19 @@ function App() {
             }}
           >
             <Icon name="info" />
-            <span>About MetroCheck</span>
+            <span>
+              About MetroCheck
+            </span>
           </button>
         </div>
 
         <div className="sidebar-bottom">
           <div className="system-card">
             <div className="system-card-icon">
-              <Icon name="shield" size={22} />
+              <Icon
+                name="shield"
+                size={22}
+              />
             </div>
 
             <div>
@@ -1399,7 +2271,9 @@ function App() {
                 Inspection Engine
               </strong>
 
-              <span>Operational</span>
+              <span>
+                Operational
+              </span>
             </div>
 
             <span className="online-dot" />
@@ -1408,9 +2282,13 @@ function App() {
           <button
             className="theme-button"
             onClick={function () {
-              setDarkMode(function (previous) {
-                return !previous;
-              });
+              setDarkMode(
+                function (
+                  previous
+                ) {
+                  return !previous;
+                }
+              );
             }}
           >
             <Icon
@@ -1450,18 +2328,23 @@ function App() {
         <header className="topbar">
           <div className="topbar-left">
             <div className="breadcrumb">
-              <span>MetroCheck</span>
+              <span>
+                MetroCheck
+              </span>
 
               <span className="breadcrumb-separator">
                 /
               </span>
 
               <strong>
-                {page === "dashboard"
+                {page ===
+                "dashboard"
                   ? "Dashboard"
-                  : page === "scanner"
+                  : page ===
+                    "scanner"
                   ? "New Inspection"
-                  : page === "history"
+                  : page ===
+                    "history"
                   ? "Inspection History"
                   : "About"}
               </strong>
@@ -1490,15 +2373,20 @@ function App() {
           </div>
         </header>
 
-        {page === "dashboard" && (
+        {page ===
+          "dashboard" && (
           <DashboardPage
             history={history}
             onNewInspection={
               startNewInspection
             }
-            onOpenHistory={function () {
-              navigate("history");
-            }}
+            onOpenHistory={
+              function () {
+                navigate(
+                  "history"
+                );
+              }
+            }
             onOpenInspection={
               loadInspection
             }
@@ -1507,44 +2395,117 @@ function App() {
 
         {page === "scanner" && (
           <ScannerPage
-            inspectionId={inspectionId}
-            imagePreview={imagePreview}
-            imageFile={imageFile}
-            scanState={scanState}
-            scanProgress={scanProgress}
-            ocrText={ocrText}
-            fields={fields}
-            results={results}
-            score={score}
-            status={status}
-            passedCount={passedCount}
-            failedCount={failedCount}
+            inspectionId={
+              inspectionId
+            }
+            imagePreview={
+              imagePreview
+            }
+            imageFile={
+              imageFile
+            }
+            scanState={
+              scanState
+            }
+            scanProgress={
+              scanProgress
+            }
+            ocrText={
+              ocrText
+            }
+            fields={
+              fields
+            }
+            results={
+              results
+            }
+            score={
+              score
+            }
+            status={
+              status
+            }
+            passedCount={
+              passedCount
+            }
+            failedCount={
+              failedCount
+            }
             physicalQuantity={
               physicalQuantity
             }
-            evidence={evidence}
-            decision={decision}
-            notes={notes}
-            cameraOpen={cameraOpen}
-            cameraError={cameraError}
-            cameraReady={cameraReady}
-            videoRef={videoRef}
-            onImage={handleImage}
-            onScan={runOCR}
-            onField={updateField}
+            physicalUnit={
+              physicalUnit
+            }
+            quantityVerification={
+              quantityVerification
+            }
+            evidence={
+              evidence
+            }
+            decision={
+              decision
+            }
+            notes={
+              notes
+            }
+            inspector={
+              inspector
+            }
+            cameraOpen={
+              cameraOpen
+            }
+            cameraError={
+              cameraError
+            }
+            cameraReady={
+              cameraReady
+            }
+            videoRef={
+              videoRef
+            }
+            onImage={
+              handleImage
+            }
+            onScan={
+              runOCR
+            }
+            onField={
+              updateField
+            }
             onPhysicalQuantity={
               setPhysicalQuantity
             }
-            onEvidence={handleEvidence}
+            onPhysicalUnit={
+              setPhysicalUnit
+            }
+            onEvidence={
+              handleEvidence
+            }
             onRemoveEvidence={
               removeEvidence
             }
-            onDecision={setDecision}
-            onNotes={setNotes}
-            onSave={saveInspection}
-            onPDF={generatePDF}
-            onReset={resetInspection}
-            onOpenCamera={openCamera}
+            onDecision={
+              setDecision
+            }
+            onNotes={
+              setNotes
+            }
+            onInspector={
+              updateInspector
+            }
+            onSave={
+              saveInspection
+            }
+            onPDF={
+              generatePDF
+            }
+            onReset={
+              resetInspection
+            }
+            onOpenCamera={
+              openCamera
+            }
             onCloseCamera={
               closeCamera
             }
@@ -1556,21 +2517,33 @@ function App() {
 
         {page === "history" && (
           <HistoryPage
-            history={filteredHistory}
-            allHistory={history}
-            search={historySearch}
-            filter={historyFilter}
+            history={
+              filteredHistory
+            }
+            allHistory={
+              history
+            }
+            search={
+              historySearch
+            }
+            filter={
+              historyFilter
+            }
             onSearch={
               setHistorySearch
             }
             onFilter={
               setHistoryFilter
             }
-            onOpen={loadInspection}
+            onOpen={
+              loadInspection
+            }
             onDelete={
               deleteInspection
             }
-            onClear={clearHistory}
+            onClear={
+              clearHistory
+            }
             onNew={
               startNewInspection
             }
@@ -1591,42 +2564,61 @@ function App() {
             />
           </div>
 
-          <span>{toast}</span>
+          <span>
+            {toast}
+          </span>
         </div>
       )}
     </div>
   );
 }
 
-function DashboardPage(props) {
-  var history = props.history;
+function DashboardPage(
+  props
+) {
+  var history =
+    props.history;
 
-  var compliant = history.filter(
-    function (item) {
-      return item.status === "COMPLIANT";
-    }
-  ).length;
+  var compliant =
+    history.filter(
+      function (item) {
+        return (
+          item.status ===
+          "COMPLIANT"
+        );
+      }
+    ).length;
 
-  var nonCompliant = history.filter(
-    function (item) {
-      return item.status === "NON-COMPLIANT";
-    }
-  ).length;
+  var nonCompliant =
+    history.filter(
+      function (item) {
+        return (
+          item.status ===
+          "NON-COMPLIANT"
+        );
+      }
+    ).length;
 
-  var review = history.filter(
-    function (item) {
-      return item.status === "REVIEW REQUIRED";
-    }
-  ).length;
+  var review =
+    history.filter(
+      function (item) {
+        return (
+          item.status ===
+          "REVIEW REQUIRED"
+        );
+      }
+    ).length;
 
-  var recent = history.slice(0, 5);
+  var recent =
+    history.slice(0, 5);
 
   return (
     <div className="page">
       <section className="hero">
         <div>
           <div className="eyebrow">
-            LEGAL METROLOGY • INSPECTION WORKSPACE
+            LEGAL METROLOGY •
+            INSPECTION WORKSPACE
           </div>
 
           <h1>
@@ -1638,12 +2630,15 @@ function DashboardPage(props) {
           </h1>
 
           <p>
-            Scan packaged commodity
-            labels, identify mandatory
+            Scan packaged
+            commodity labels,
+            identify mandatory
             declarations, analyze
-            compliance requirements
-            and create an
-            inspection-ready report.
+            compliance
+            requirements and
+            create an
+            inspection-ready
+            report.
           </p>
 
           <div className="hero-actions">
@@ -1658,7 +2653,8 @@ function DashboardPage(props) {
                 size={21}
               />
 
-              Start New Inspection
+              Start New
+              Inspection
 
               <Icon
                 name="arrow"
@@ -1736,7 +2732,9 @@ function DashboardPage(props) {
       <div className="stat-grid">
         <StatCard
           label="Total Inspections"
-          value={history.length}
+          value={
+            history.length
+          }
           caption="Saved in this browser"
           icon="file"
           tone="blue"
@@ -1744,7 +2742,9 @@ function DashboardPage(props) {
 
         <StatCard
           label="Compliant"
-          value={compliant}
+          value={
+            compliant
+          }
           caption="Passed all checks"
           icon="check"
           tone="green"
@@ -1752,7 +2752,9 @@ function DashboardPage(props) {
 
         <StatCard
           label="Non-Compliant"
-          value={nonCompliant}
+          value={
+            nonCompliant
+          }
           caption="Violations identified"
           icon="warning"
           tone="red"
@@ -1760,7 +2762,9 @@ function DashboardPage(props) {
 
         <StatCard
           label="Review Required"
-          value={review}
+          value={
+            review
+          }
           caption="Needs inspector review"
           icon="search"
           tone="amber"
@@ -1794,7 +2798,8 @@ function DashboardPage(props) {
             </button>
           </div>
 
-          {recent.length === 0 ? (
+          {recent.length ===
+          0 ? (
             <EmptyState
               icon="scan"
               title="No inspections yet"
@@ -1813,18 +2818,20 @@ function DashboardPage(props) {
           ) : (
             <div className="activity-list">
               {recent.map(
-                function (item) {
+                function (
+                  item
+                ) {
                   return (
                     <button
                       className="activity-row"
-                      key={item.id}
-                      onClick={
-                        function () {
-                          props.onOpenInspection(
-                            item
-                          );
-                        }
+                      key={
+                        item.id
                       }
+                      onClick={function () {
+                        props.onOpenInspection(
+                          item
+                        );
+                      }}
                     >
                       <div className="activity-icon">
                         <Icon
@@ -1835,19 +2842,31 @@ function DashboardPage(props) {
 
                       <div className="activity-main">
                         <strong>
-                          {item.productName}
+                          {
+                            item.productName
+                          }
                         </strong>
 
                         <span>
-                          {item.id} •{" "}
-                          {item.date} •{" "}
-                          {item.time}
+                          {
+                            item.id
+                          }{" "}
+                          •{" "}
+                          {
+                            item.date
+                          }{" "}
+                          •{" "}
+                          {
+                            item.time
+                          }
                         </span>
                       </div>
 
                       <div className="activity-score">
                         <strong>
-                          {item.score}%
+                          {
+                            item.score
+                          }%
                         </strong>
 
                         <span>
@@ -1934,11 +2953,13 @@ function DashboardPage(props) {
           </strong>
 
           <p>
-            OCR and automated checks
-            assist the inspector.
-            Physical measurements remain
-            inspector-entered and final
-            enforcement decisions remain
+            OCR and automated
+            checks assist the
+            inspector. Physical
+            measurements remain
+            inspector-entered and
+            final enforcement
+            decisions remain
             subject to verification.
           </p>
         </div>
@@ -1979,7 +3000,9 @@ function StatCard(props) {
   );
 }
 
-function WorkflowStep(props) {
+function WorkflowStep(
+  props
+) {
   return (
     <div className="workflow-step">
       <div className="workflow-number">
@@ -1999,7 +3022,9 @@ function WorkflowStep(props) {
   );
 }
 
-function ScannerPage(props) {
+function ScannerPage(
+  props
+) {
   var [showOCR, setShowOCR] =
     useState(false);
 
@@ -2056,7 +3081,8 @@ function ScannerPage(props) {
           number="03"
           title="Compliance"
           active={
-            props.results.length > 0
+            props.results.length >
+            0
           }
         />
 
@@ -2087,7 +3113,9 @@ function ScannerPage(props) {
 
               {props.scanState ===
                 "complete" && (
-                <StatusBadge status="SCAN COMPLETE" />
+                <StatusBadge
+                  status="SCAN COMPLETE"
+                />
               )}
             </div>
 
@@ -2098,14 +3126,16 @@ function ScannerPage(props) {
                     type="file"
                     accept="image/*"
                     capture="environment"
-                    onChange={
-                      function (event) {
-                        props.onImage(
-                          event.target.files &&
-                            event.target.files[0]
-                        );
-                      }
-                    }
+                    onChange={function (
+                      event
+                    ) {
+                      props.onImage(
+                        event.target
+                          .files &&
+                          event.target
+                            .files[0]
+                      );
+                    }}
                   />
 
                   <div className="upload-icon">
@@ -2136,16 +3166,19 @@ function ScannerPage(props) {
 
                   <small>
                     JPG, PNG or WEBP •
-                    Clear text recommended
+                    Clear text
+                    recommended
                   </small>
                 </label>
 
                 <div
                   style={{
-                    display: "flex",
+                    display:
+                      "flex",
                     justifyContent:
                       "center",
-                    marginTop: "14px",
+                    marginTop:
+                      "14px",
                   }}
                 >
                   <button
@@ -2177,7 +3210,9 @@ function ScannerPage(props) {
                 <div className="image-overlay">
                   <span>
                     {props.imageFile
-                      ? props.imageFile.name
+                      ? props
+                          .imageFile
+                          .name
                       : "Inspection image"}
                   </span>
 
@@ -2186,14 +3221,16 @@ function ScannerPage(props) {
                       type="file"
                       accept="image/*"
                       capture="environment"
-                      onChange={
-                        function (event) {
-                          props.onImage(
-                            event.target.files &&
-                              event.target.files[0]
-                          );
-                        }
-                      }
+                      onChange={function (
+                        event
+                      ) {
+                        props.onImage(
+                          event.target
+                            .files &&
+                            event.target
+                              .files[0]
+                        );
+                      }}
                     />
 
                     Change image
@@ -2215,19 +3252,25 @@ function ScannerPage(props) {
                   <div>
                     <strong>
                       {props.imageFile
-                        ? props.imageFile.name
+                        ? props
+                            .imageFile
+                            .name
                         : "Package image"}
                     </strong>
 
                     <span>
                       {props.imageFile &&
-                      props.imageFile.size
+                      props.imageFile
+                        .size
                         ? (
-                            props.imageFile
+                            props
+                              .imageFile
                               .size /
                             1024 /
                             1024
-                          ).toFixed(2) +
+                          ).toFixed(
+                            2
+                          ) +
                           " MB"
                         : "Loaded inspection image"}
                     </span>
@@ -2236,7 +3279,8 @@ function ScannerPage(props) {
 
                 <div
                   style={{
-                    display: "flex",
+                    display:
+                      "flex",
                     gap: "8px",
                     flexWrap:
                       "wrap",
@@ -2299,7 +3343,10 @@ function ScannerPage(props) {
                   </span>
 
                   <strong>
-                    {props.scanProgress}%
+                    {
+                      props.scanProgress
+                    }
+                    %
                   </strong>
                 </div>
 
@@ -2310,7 +3357,8 @@ function ScannerPage(props) {
                       width:
                         String(
                           props.scanProgress
-                        ) + "%",
+                        ) +
+                        "%",
                     }}
                   />
                 </div>
@@ -2318,8 +3366,8 @@ function ScannerPage(props) {
                 <span>
                   OCR is identifying
                   text and declaration
-                  patterns. This may take
-                  a few moments.
+                  patterns. This may
+                  take a few moments.
                 </span>
               </div>
             )}
@@ -2340,9 +3388,10 @@ function ScannerPage(props) {
                   </strong>
 
                   <p>
-                    You can continue by
-                    entering the declaration
-                    fields manually.
+                    You can continue
+                    by entering the
+                    declaration fields
+                    manually.
                   </p>
                 </div>
               </div>
@@ -2365,7 +3414,9 @@ function ScannerPage(props) {
                 className="text-button"
                 onClick={function () {
                   setShowOCR(
-                    function (previous) {
+                    function (
+                      previous
+                    ) {
                       return !previous;
                     }
                   );
@@ -2386,9 +3437,15 @@ function ScannerPage(props) {
 
             <div className="field-grid">
               {FIELD_CONFIG.map(
-                function (item) {
-                  var key = item[0];
-                  var label = item[1];
+                function (
+                  item
+                ) {
+                  var key =
+                    item[0];
+
+                  var label =
+                    item[1];
+
                   var placeholder =
                     item[2];
 
@@ -2403,20 +3460,21 @@ function ScannerPage(props) {
 
                       <input
                         value={
-                          props.fields[
+                          props
+                            .fields[
                             key
                           ]
                         }
-                        onChange={
-                          function (
+                        onChange={function (
+                          event
+                        ) {
+                          props.onField(
+                            key,
                             event
-                          ) {
-                            props.onField(
-                              key,
-                              event.target.value
-                            );
-                          }
-                        }
+                              .target
+                              .value
+                          );
+                        }}
                         placeholder={
                           placeholder
                         }
@@ -2441,7 +3499,8 @@ function ScannerPage(props) {
               </div>
 
               {props.results
-                .length > 0 && (
+                .length >
+                0 && (
                 <StatusBadge
                   status={
                     props.status
@@ -2450,7 +3509,8 @@ function ScannerPage(props) {
               )}
             </div>
 
-            {props.results.length ===
+            {props.results
+              .length ===
             0 ? (
               <EmptyState
                 icon="search"
@@ -2463,7 +3523,9 @@ function ScannerPage(props) {
                   <div className="score-ring">
                     <div>
                       <strong>
-                        {props.score}
+                        {
+                          props.score
+                        }
                       </strong>
 
                       <span>
@@ -2478,13 +3540,20 @@ function ScannerPage(props) {
                     </span>
 
                     <h3>
-                      {props.status}
+                      {
+                        props.status
+                      }
                     </h3>
 
                     <p>
-                      {props.passedCount}{" "}
-                      checks passed and{" "}
-                      {props.failedCount}{" "}
+                      {
+                        props.passedCount
+                      }{" "}
+                      checks passed
+                      and{" "}
+                      {
+                        props.failedCount
+                      }{" "}
                       checks require
                       attention.
                     </p>
@@ -2492,7 +3561,9 @@ function ScannerPage(props) {
 
                   <div className="mini-stat">
                     <strong>
-                      {props.passedCount}
+                      {
+                        props.passedCount
+                      }
                     </strong>
 
                     <span>
@@ -2502,7 +3573,9 @@ function ScannerPage(props) {
 
                   <div className="mini-stat danger">
                     <strong>
-                      {props.failedCount}
+                      {
+                        props.failedCount
+                      }
                     </strong>
 
                     <span>
@@ -2513,10 +3586,14 @@ function ScannerPage(props) {
 
                 <div className="rule-list">
                   {props.results.map(
-                    function (rule) {
+                    function (
+                      rule
+                    ) {
                       return (
                         <RuleCard
-                          rule={rule}
+                          rule={
+                            rule
+                          }
                           key={
                             rule.id
                           }
@@ -2549,8 +3626,8 @@ function ScannerPage(props) {
                 "result-hero result-" +
                 props.status
                   .toLowerCase()
-                  .replaceAll(
-                    " ",
+                  .replace(
+                    / /g,
                     "-"
                   )
               }
@@ -2576,7 +3653,9 @@ function ScannerPage(props) {
                 </span>
 
                 <strong>
-                  {props.status}
+                  {
+                    props.status
+                  }
                 </strong>
               </div>
             </div>
@@ -2588,7 +3667,9 @@ function ScannerPage(props) {
                 </span>
 
                 <strong>
-                  {props.score}%
+                  {
+                    props.score
+                  }%
                 </strong>
               </div>
 
@@ -2598,7 +3679,8 @@ function ScannerPage(props) {
                     width:
                       String(
                         props.score
-                      ) + "%",
+                      ) +
+                      "%",
                   }}
                   className="score-bar-fill"
                 />
@@ -2667,6 +3749,64 @@ function ScannerPage(props) {
               </span>
             </div>
 
+            <div
+              className="field"
+              style={{
+                marginBottom:
+                  "14px",
+              }}
+            >
+              <label>
+                Inspector Name
+              </label>
+
+              <input
+                value={
+                  props.inspector
+                    .name
+                }
+                onChange={function (
+                  event
+                ) {
+                  props.onInspector(
+                    "name",
+                    event.target
+                      .value
+                  );
+                }}
+                placeholder="Enter inspector name"
+              />
+            </div>
+
+            <div
+              className="field"
+              style={{
+                marginBottom:
+                  "14px",
+              }}
+            >
+              <label>
+                Inspector ID
+              </label>
+
+              <input
+                value={
+                  props.inspector
+                    .id
+                }
+                onChange={function (
+                  event
+                ) {
+                  props.onInspector(
+                    "id",
+                    event.target
+                      .value
+                  );
+                }}
+                placeholder="Enter inspector / employee ID"
+              />
+            </div>
+
             <div className="field">
               <label>
                 Measured quantity
@@ -2680,15 +3820,14 @@ function ScannerPage(props) {
                   value={
                     props.physicalQuantity
                   }
-                  onChange={
-                    function (
-                      event
-                    ) {
-                      props.onPhysicalQuantity(
-                        event.target.value
-                      );
-                    }
-                  }
+                  onChange={function (
+                    event
+                  ) {
+                    props.onPhysicalQuantity(
+                      event.target
+                        .value
+                    );
+                  }}
                   placeholder="Enter measured quantity"
                 />
 
@@ -2697,6 +3836,92 @@ function ScannerPage(props) {
                 </span>
               </div>
             </div>
+
+            <div
+              className="field"
+              style={{
+                marginTop:
+                  "14px",
+              }}
+            >
+              <label>
+                Measurement unit
+              </label>
+
+              <select
+                value={
+                  props.physicalUnit
+                }
+                onChange={function (
+                  event
+                ) {
+                  props.onPhysicalUnit(
+                    event.target
+                      .value
+                  );
+                }}
+              >
+                <option value="g">
+                  grams (g)
+                </option>
+
+                <option value="kg">
+                  kilograms (kg)
+                </option>
+
+                <option value="mg">
+                  milligrams (mg)
+                </option>
+
+                <option value="ml">
+                  millilitres (ml)
+                </option>
+
+                <option value="l">
+                  litres (L)
+                </option>
+              </select>
+            </div>
+
+            {props.quantityVerification
+              .available && (
+              <div
+                className="inspector-note"
+                style={{
+                  marginTop:
+                    "14px",
+                }}
+              >
+                <Icon
+                  name={
+                    props
+                      .quantityVerification
+                      .status ===
+                    "PASS"
+                      ? "check"
+                      : "warning"
+                  }
+                  size={18}
+                />
+
+                <span>
+                  <strong>
+                    Quantity check:{" "}
+                    {
+                      props
+                        .quantityVerification
+                        .status
+                    }
+                  </strong>
+                  <br />
+                  {
+                    props
+                      .quantityVerification
+                      .message
+                  }
+                </span>
+              </div>
+            )}
 
             <div className="decision-block">
               <label>
@@ -2718,7 +3943,9 @@ function ScannerPage(props) {
                     "search",
                   ],
                 ].map(
-                  function (item) {
+                  function (
+                    item
+                  ) {
                     return (
                       <button
                         key={
@@ -2731,13 +3958,11 @@ function ScannerPage(props) {
                             ? "selected"
                             : "")
                         }
-                        onClick={
-                          function () {
-                            props.onDecision(
-                              item[0]
-                            );
-                          }
-                        }
+                        onClick={function () {
+                          props.onDecision(
+                            item[0]
+                          );
+                        }}
                       >
                         <Icon
                           name={
@@ -2746,7 +3971,9 @@ function ScannerPage(props) {
                           size={16}
                         />
 
-                        {item[0]}
+                        {
+                          item[0]
+                        }
                       </button>
                     );
                   }
@@ -2763,15 +3990,14 @@ function ScannerPage(props) {
                 value={
                   props.notes
                 }
-                onChange={
-                  function (
-                    event
-                  ) {
-                    props.onNotes(
-                      event.target.value
-                    );
-                  }
-                }
+                onChange={function (
+                  event
+                ) {
+                  props.onNotes(
+                    event.target
+                      .value
+                  );
+                }}
                 placeholder="Record observations, verification notes or additional findings..."
                 rows={5}
               />
@@ -2796,13 +4022,17 @@ function ScannerPage(props) {
                 type="file"
                 multiple
                 accept="image/*,.pdf"
-                onChange={
-                  function (event) {
-                    props.onEvidence(
-                      event.target.files
-                    );
-                  }
-                }
+                onChange={function (
+                  event
+                ) {
+                  props.onEvidence(
+                    event.target
+                      .files
+                  );
+
+                  event.target.value =
+                    "";
+                }}
               />
 
               <Icon
@@ -2822,10 +4052,13 @@ function ScannerPage(props) {
             </label>
 
             {props.evidence
-              .length > 0 && (
+              .length >
+              0 && (
               <div className="evidence-list">
                 {props.evidence.map(
-                  function (item) {
+                  function (
+                    item
+                  ) {
                     return (
                       <div
                         className="evidence-item"
@@ -2842,7 +4075,9 @@ function ScannerPage(props) {
 
                         <div>
                           <strong>
-                            {item.name}
+                            {
+                              item.name
+                            }
                           </strong>
 
                           <span>
@@ -2857,13 +4092,12 @@ function ScannerPage(props) {
                         </div>
 
                         <button
-                          onClick={
-                            function () {
-                              props.onRemoveEvidence(
-                                item.id
-                              );
-                            }
-                          }
+                          onClick={function () {
+                            props.onRemoveEvidence(
+                              item.id
+                            );
+                          }}
+                          title="Remove evidence"
                         >
                           <Icon
                             name="close"
@@ -2938,42 +4172,57 @@ function ScannerPage(props) {
   );
 }
 
-function CameraModal(props) {
+function CameraModal(
+  props
+) {
   return (
     <div
       style={{
-        position: "fixed",
+        position:
+          "fixed",
         inset: 0,
         zIndex: 9999,
         background:
           "rgba(4, 12, 28, 0.88)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        display:
+          "flex",
+        alignItems:
+          "center",
+        justifyContent:
+          "center",
         padding: "20px",
       }}
     >
       <div
         style={{
-          width: "min(900px, 100%)",
-          maxHeight: "92vh",
-          overflow: "auto",
+          width:
+            "min(900px, 100%)",
+          maxHeight:
+            "92vh",
+          overflow:
+            "auto",
           background:
             "var(--surface, #ffffff)",
-          borderRadius: "22px",
-          padding: "20px",
+          borderRadius:
+            "22px",
+          padding:
+            "20px",
           boxShadow:
             "0 25px 80px rgba(0,0,0,0.35)",
         }}
       >
         <div
           style={{
-            display: "flex",
+            display:
+              "flex",
             justifyContent:
               "space-between",
-            alignItems: "center",
-            marginBottom: "16px",
-            gap: "12px",
+            alignItems:
+              "center",
+            marginBottom:
+              "16px",
+            gap:
+              "12px",
           }}
         >
           <div>
@@ -3026,7 +4275,9 @@ function CameraModal(props) {
               </strong>
 
               <p>
-                {props.cameraError}
+                {
+                  props.cameraError
+                }
               </p>
             </div>
           </div>
@@ -3043,7 +4294,8 @@ function CameraModal(props) {
                 "hidden",
               minHeight:
                 "360px",
-              display: "flex",
+              display:
+                "flex",
               alignItems:
                 "center",
               justifyContent:
@@ -3058,8 +4310,10 @@ function CameraModal(props) {
               playsInline
               muted
               style={{
-                display: "block",
-                width: "100%",
+                display:
+                  "block",
+                width:
+                  "100%",
                 maxHeight:
                   "65vh",
                 objectFit:
@@ -3108,11 +4362,14 @@ function CameraModal(props) {
 
         <div
           style={{
-            display: "flex",
+            display:
+              "flex",
             justifyContent:
               "center",
-            gap: "12px",
-            marginTop: "18px",
+            gap:
+              "12px",
+            marginTop:
+              "18px",
             flexWrap:
               "wrap",
           }}
@@ -3154,7 +4411,9 @@ function CameraModal(props) {
   );
 }
 
-function PageTitle(props) {
+function PageTitle(
+  props
+) {
   return (
     <div className="page-title">
       <div>
@@ -3176,7 +4435,9 @@ function PageTitle(props) {
   );
 }
 
-function ProgressStep(props) {
+function ProgressStep(
+  props
+) {
   return (
     <div
       className={
@@ -3197,8 +4458,11 @@ function ProgressStep(props) {
   );
 }
 
-function RuleCard(props) {
-  var rule = props.rule;
+function RuleCard(
+  props
+) {
+  var rule =
+    props.rule;
 
   return (
     <div
@@ -3238,7 +4502,9 @@ function RuleCard(props) {
                 rule.severity.toLowerCase()
               }
             >
-              {rule.severity}
+              {
+                rule.severity
+              }
             </span>
 
             <StatusBadge
@@ -3265,9 +4531,10 @@ function RuleCard(props) {
                 0.75,
             }}
           >
-            Rule support:
-            {" "}
-            {rule.description}
+            Rule support:{" "}
+            {
+              rule.description
+            }
           </small>
         )}
       </div>
@@ -3275,7 +4542,9 @@ function RuleCard(props) {
   );
 }
 
-function SummaryLine(props) {
+function SummaryLine(
+  props
+) {
   return (
     <div className="summary-line">
       <span>
@@ -3297,7 +4566,9 @@ function SummaryLine(props) {
   );
 }
 
-function HistoryPage(props) {
+function HistoryPage(
+  props
+) {
   return (
     <div className="page">
       <PageTitle
@@ -3332,15 +4603,14 @@ function HistoryPage(props) {
             value={
               props.search
             }
-            onChange={
-              function (
-                event
-              ) {
-                props.onSearch(
-                  event.target.value
-                );
-              }
-            }
+            onChange={function (
+              event
+            ) {
+              props.onSearch(
+                event.target
+                  .value
+              );
+            }}
             placeholder="Search inspection ID, commodity or status..."
           />
         </div>
@@ -3352,7 +4622,9 @@ function HistoryPage(props) {
             "NON-COMPLIANT",
             "REVIEW REQUIRED",
           ].map(
-            function (item) {
+            function (
+              item
+            ) {
               return (
                 <button
                   key={item}
@@ -3362,13 +4634,11 @@ function HistoryPage(props) {
                       ? "active"
                       : ""
                   }
-                  onClick={
-                    function () {
-                      props.onFilter(
-                        item
-                      );
-                    }
-                  }
+                  onClick={function () {
+                    props.onFilter(
+                      item
+                    );
+                  }}
                 >
                   {item ===
                   "ALL"
@@ -3381,7 +4651,8 @@ function HistoryPage(props) {
         </div>
 
         {props.allHistory
-          .length > 0 && (
+          .length >
+          0 && (
           <button
             className="danger-text-button"
             onClick={
@@ -3457,11 +4728,15 @@ function HistoryPage(props) {
             </div>
 
             {props.history.map(
-              function (item) {
+              function (
+                item
+              ) {
                 return (
                   <div
                     className="history-row"
-                    key={item.id}
+                    key={
+                      item.id
+                    }
                   >
                     <div className="history-id">
                       <div className="table-icon">
@@ -3473,17 +4748,23 @@ function HistoryPage(props) {
 
                       <div>
                         <strong>
-                          {item.id}
+                          {
+                            item.id
+                          }
                         </strong>
 
                         <span>
-                          {item.time}
+                          {
+                            item.time
+                          }
                         </span>
                       </div>
                     </div>
 
                     <strong className="commodity-name">
-                      {item.productName}
+                      {
+                        item.productName
+                      }
                     </strong>
 
                     <span>
@@ -3492,7 +4773,9 @@ function HistoryPage(props) {
 
                     <div className="table-score">
                       <strong>
-                        {item.score}%
+                        {
+                          item.score
+                        }%
                       </strong>
 
                       <div>
@@ -3516,13 +4799,11 @@ function HistoryPage(props) {
 
                     <div className="row-actions">
                       <button
-                        onClick={
-                          function () {
-                            props.onOpen(
-                              item
-                            );
-                          }
-                        }
+                        onClick={function () {
+                          props.onOpen(
+                            item
+                          );
+                        }}
                       >
                         Open{" "}
                         <Icon
@@ -3533,13 +4814,11 @@ function HistoryPage(props) {
 
                       <button
                         className="delete-button"
-                        onClick={
-                          function () {
-                            props.onDelete(
-                              item.id
-                            );
-                          }
-                        }
+                        onClick={function () {
+                          props.onDelete(
+                            item.id
+                          );
+                        }}
                         title="Delete inspection"
                       >
                         <Icon
@@ -3649,15 +4928,19 @@ function AboutPage() {
         </div>
 
         <p>
-          MetroCheck is a demonstration
+          MetroCheck is a
+          demonstration
           decision-support system.
-          Automated screening should
-          not be treated as a legally
-          binding determination.
-          Applicable rules, exemptions,
-          amendments, commodity-specific
-          requirements and final
-          enforcement decisions require
+          Automated screening
+          should not be treated as
+          a legally binding
+          determination. Applicable
+          rules, exemptions,
+          amendments,
+          commodity-specific
+          requirements, tolerances
+          and final enforcement
+          decisions require
           appropriate inspector and
           legal verification.
         </p>
@@ -3666,7 +4949,9 @@ function AboutPage() {
   );
 }
 
-function AboutCard(props) {
+function AboutCard(
+  props
+) {
   return (
     <div className="panel about-card">
       <div className="about-card-icon">

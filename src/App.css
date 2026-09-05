@@ -1101,9 +1101,23 @@ textarea:focus-visible {
   gap: 14px;
 }
 
+/*
+  IMPORTANT:
+  Your JSX has .sticky-panel on the LIVE RESULT panel itself.
+  Keep that panel normal so its size and structure stay untouched.
+*/
 .sticky-panel {
+  position: static;
+}
+
+/*
+  Make the entire right column sticky instead.
+  This keeps LIVE RESULT + the panels below it together.
+*/
+.scanner-right {
   position: sticky;
   top: 84px;
+  align-self: start;
 }
 
 .upload-zone {
@@ -2422,6 +2436,14 @@ body.dark-mode .score-ring::before {
 
   .scanner-layout {
     grid-template-columns: 1fr;
+  }
+
+  /*
+    Disable sticky when both columns become one column.
+  */
+  .scanner-right {
+    position: static;
+    align-self: stretch;
   }
 
   .sticky-panel {
