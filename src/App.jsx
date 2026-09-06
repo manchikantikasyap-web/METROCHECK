@@ -1429,6 +1429,42 @@ function App() {
   );
 
   useEffect(function () {
+    if (!cameraOpen) {
+      return undefined;
+    }
+
+    var video = videoRef.current;
+    var stream = streamRef.current;
+
+    if (!video || !stream) {
+      return undefined;
+    }
+
+    video.srcObject = stream;
+
+    var playPromise = video.play();
+
+    if (playPromise && typeof playPromise.then === "function") {
+      playPromise
+        .then(function () {
+          setCameraReady(true);
+        })
+        .catch(function () {
+          /* The video element can already be playing on some browsers. */
+          setCameraReady(true);
+        });
+    } else {
+      setCameraReady(true);
+    }
+
+    return function () {
+      if (video.srcObject === stream) {
+        video.srcObject = null;
+      }
+    };
+  }, [cameraOpen]);
+
+  useEffect(function () {
     return function () {
       if (streamRef.current) {
         streamRef.current
@@ -1762,22 +1798,6 @@ function App() {
       streamRef.current = stream;
 
       setCameraOpen(true);
-
-      setTimeout(function () {
-        if (videoRef.current) {
-          videoRef.current.srcObject =
-            stream;
-
-          videoRef.current
-            .play()
-            .then(function () {
-              setCameraReady(true);
-            })
-            .catch(function () {
-              setCameraReady(true);
-            });
-        }
-      }, 100);
     } catch (error) {
       console.error(error);
 
@@ -1858,26 +1878,31 @@ function App() {
       height
     );
 
-    canvas.toBlob(
-      function (blob) {
-        if (!blob) {
-          showToast(
-            "Could not capture the camera image."
-          );
-          return;
-        }
-
-        var file = new File(
-          [blob],
-          "MetroCheck-" +
-            selectedImageSide +
-            "-Capture-" +
-            Date.now() +
-            ".jpg",
-          {
-            type: "image/jpeg",
-          }
+    function finishCapture(blob) {
+      if (!blob) {
+        showToast(
+          "Could not capture the camera image."
         );
+        return;
+      }
+
+      try {
+        var file =
+          typeof File === "function"
+            ? new File(
+                [blob],
+                "MetroCheck-" +
+                  selectedImageSide +
+                  "-Capture-" +
+                  Date.now() +
+                  ".jpg",
+                {
+                  type: "image/jpeg",
+                }
+              )
+            : new Blob([blob], {
+                type: "image/jpeg",
+              });
 
         var previousImage =
           packageImages[selectedImageSide];
@@ -1931,10 +1956,61 @@ function App() {
             : "Back") +
             " photo captured successfully."
         );
-      },
-      "image/jpeg",
-      0.92
-    );
+      } catch (error) {
+        console.error(
+          "MetroCheck camera capture failed:",
+          error
+        );
+        showToast(
+          "The photo could not be saved. Please try again."
+        );
+      }
+    }
+
+    try {
+      if (typeof canvas.toBlob === "function") {
+        canvas.toBlob(
+          function (blob) {
+            finishCapture(blob);
+          },
+          "image/jpeg",
+          0.92
+        );
+      } else {
+        var dataUrl = canvas.toDataURL(
+          "image/jpeg",
+          0.92
+        );
+
+        var parts = dataUrl.split(",");
+        var binary = atob(parts[1]);
+        var bytes = new Uint8Array(
+          binary.length
+        );
+
+        for (
+          var index = 0;
+          index < binary.length;
+          index += 1
+        ) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+
+        finishCapture(
+          new Blob([bytes], {
+            type: "image/jpeg",
+          })
+        );
+      }
+    } catch (error) {
+      console.error(
+        "MetroCheck camera capture failed:",
+        error
+      );
+      showToast(
+        "The camera could not create an image. Please try again."
+      );
+    }
   }
 
   async function runOCR() {
@@ -6410,7 +6486,10 @@ function AboutCard(props) {
   return (
     <div className="panel about-card">
       <div className="about-card-icon">
-        <Icon name={props.icon || "info"} size={24} />
+        <Icon
+          name={props.icon || "info"}
+          size={24}
+        />
       </div>
 
       <div>
