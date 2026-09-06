@@ -178,6 +178,80 @@ function formatTime(date) {
   });
 }
 
+function getRecordTimestamp(record) {
+  var raw = Number(record && record.timestamp);
+
+  if (Number.isFinite(raw) && raw > 0) {
+    return raw;
+  }
+
+  if (record && record.date) {
+    var parsed = Date.parse(
+      String(record.date) +
+        (record.time ? " " + String(record.time) : "")
+    );
+
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
+}
+
+function normalizeHistoryRecord(record) {
+  var source = record && typeof record === "object"
+    ? record
+    : {};
+
+  var timestamp = getRecordTimestamp(source);
+  var dateValue = timestamp
+    ? new Date(timestamp)
+    : null;
+
+  return Object.assign(
+    {},
+    source,
+    {
+      id: source.id || makeInspectionId(),
+      productName:
+        source.productName ||
+        (source.fields && source.fields.productName) ||
+        "Unknown commodity",
+      status:
+        source.status ||
+        source.decision ||
+        "REVIEW REQUIRED",
+      score: Number.isFinite(Number(source.score))
+        ? Number(source.score)
+        : 0,
+      ruleResults: Array.isArray(source.ruleResults)
+        ? source.ruleResults
+        : [],
+      evidence: Array.isArray(source.evidence)
+        ? source.evidence
+        : [],
+      inspector:
+        source.inspector && typeof source.inspector === "object"
+          ? source.inspector
+          : Object.assign({}, EMPTY_INSPECTOR),
+      fields:
+        source.fields && typeof source.fields === "object"
+          ? Object.assign({}, EMPTY_FIELDS, source.fields)
+          : Object.assign({}, EMPTY_FIELDS),
+      timestamp: timestamp || Date.now(),
+      date:
+        dateValue
+          ? formatDate(dateValue)
+          : source.date || formatDate(),
+      time:
+        dateValue
+          ? formatTime(dateValue)
+          : source.time || formatTime(),
+    }
+  );
+}
+
 function makeInspectionId() {
   var d = new Date();
 
@@ -337,10 +411,8 @@ function extractFields(rawText) {
 }
 
 /*
- * Converts common mass/volume declarations into a numeric base value.
- * This is used only for a basic demonstration comparison.
- * It is NOT a substitute for commodity-specific Legal Metrology
- * verification or statutory tolerance calculations.
+ * Basic mass / volume normalization for demonstration screening.
+ * This is NOT a statutory Legal Metrology tolerance calculation.
  */
 function parseQuantity(value) {
   var text = String(value || "")
@@ -411,12 +483,19 @@ function parseQuantity(value) {
   };
 }
 
-function buildQuantityVerification(fields, physicalQuantity, physicalUnit) {
+function buildQuantityVerification(
+  fields,
+  physicalQuantity,
+  physicalUnit
+) {
   var declared = parseQuantity(fields.netQuantity);
-
   var measuredNumber = Number(physicalQuantity);
 
-  if (!declared || !Number.isFinite(measuredNumber) || measuredNumber <= 0) {
+  if (
+    !declared ||
+    !Number.isFinite(measuredNumber) ||
+    measuredNumber <= 0
+  ) {
     return {
       available: false,
       comparable: false,
@@ -478,6 +557,7 @@ function buildQuantityVerification(fields, physicalQuantity, physicalUnit) {
 
   var difference = normalizedMeasured - declared.value;
   var absoluteDifference = Math.abs(difference);
+
   var differencePercent =
     declared.value > 0
       ? (absoluteDifference / declared.value) * 100
@@ -491,8 +571,7 @@ function buildQuantityVerification(fields, physicalQuantity, physicalUnit) {
     declared.value * 0.02;
 
   var withinDemonstrationThreshold =
-    absoluteDifference <=
-    demonstrationThreshold;
+    absoluteDifference <= demonstrationThreshold;
 
   var status = withinDemonstrationThreshold
     ? "PASS"
@@ -529,11 +608,46 @@ function buildQuantityVerification(fields, physicalQuantity, physicalUnit) {
   };
 }
 
+function hasInspectionData(
+  fields,
+  physicalQuantity,
+  physicalUnit
+) {
+  var fieldValues = Object.values(fields || {});
+
+  var hasFields = fieldValues.some(function (value) {
+    return String(value || "").trim().length > 0;
+  });
+
+  var hasQuantity =
+    String(physicalQuantity || "").trim().length > 0;
+
+  var hasUnit =
+    String(physicalUnit || "").trim().length > 0;
+
+  return hasFields || (hasQuantity && hasUnit);
+}
+
 function runCompliance(
   fields,
   physicalQuantity,
   physicalUnit
 ) {
+  /*
+   * PHASE 3 FIX:
+   * A completely new inspection must not automatically become
+   * NON-COMPLIANT merely because no fields have been scanned yet.
+   */
+  if (
+    !hasInspectionData(
+      fields,
+      physicalQuantity,
+      physicalUnit
+    )
+  ) {
+    return [];
+  }
+
   var results = RULES.map(function (rule) {
     var passed = rule.check(fields);
 
@@ -572,13 +686,6 @@ function runCompliance(
       quantityRule.status = "PASS";
       quantityRule.message =
         "Declared quantity is present. " +
-        quantityVerification.message;
-    } else if (
-      quantityVerification.status ===
-      "UNIT REVIEW"
-    ) {
-      quantityRule.status = "FAIL";
-      quantityRule.message =
         quantityVerification.message;
     } else {
       quantityRule.status = "FAIL";
@@ -665,6 +772,7 @@ function Icon(props) {
 
 function StatusBadge(props) {
   var status = props.status;
+
   var normalized = String(status)
     .toLowerCase()
     .replace(/\s/g, "-");
@@ -709,6 +817,14 @@ function App() {
 
   var [inspectionId, setInspectionId] =
     useState(makeInspectionId());
+
+  /*
+   * PHASE 3:
+   * Keep the inspection's original creation timestamp so
+   * reopening an old record does not change its PDF date/time.
+   */
+  var [inspectionTimestamp, setInspectionTimestamp] =
+    useState(Date.now());
 
   var [imageFile, setImageFile] =
     useState(null);
@@ -781,7 +897,15 @@ function App() {
       );
 
       if (Array.isArray(saved)) {
-        setHistory(saved);
+        var normalizedHistory = saved
+          .map(function (item) {
+            return normalizeHistoryRecord(item);
+          })
+          .sort(function (a, b) {
+            return getRecordTimestamp(b) - getRecordTimestamp(a);
+          });
+
+        setHistory(normalizedHistory);
       } else {
         setHistory([]);
       }
@@ -829,11 +953,8 @@ function App() {
         streamRef.current = null;
       }
 
-      if (
-        videoRef.current
-      ) {
-        videoRef.current.srcObject =
-          null;
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
       }
     };
   }, []);
@@ -894,38 +1015,37 @@ function App() {
 
   var filteredHistory = useMemo(
     function () {
-      return history.filter(
-        function (item) {
-          var search =
-            historySearch.toLowerCase();
+      return history.filter(function (item) {
+        var search =
+          historySearch.toLowerCase();
 
-          var matchesSearch =
-            !search ||
-            (
-              String(item.id || "") +
-              " " +
-              String(
-                item.productName || ""
-              ) +
-              " " +
-              String(
-                item.status || ""
-              )
-            )
-              .toLowerCase()
-              .includes(search);
+        var matchesSearch =
+          !search ||
+          (
+            String(item.id || "") +
+            " " +
+            String(item.productName || "") +
+            " " +
+            String(item.status || "") +
+            " " +
+            String(item.date || "") +
+            " " +
+            String(item.inspector && item.inspector.name || "") +
+            " " +
+            String(item.inspector && item.inspector.id || "")
+          )
+            .toLowerCase()
+            .includes(search);
 
-          var matchesFilter =
-            historyFilter === "ALL" ||
-            item.status ===
-              historyFilter;
+        var matchesFilter =
+          historyFilter === "ALL" ||
+          item.status === historyFilter;
 
-          return (
-            matchesSearch &&
-            matchesFilter
-          );
-        }
-      );
+        return (
+          matchesSearch &&
+          matchesFilter
+        );
+      });
     },
     [
       history,
@@ -963,9 +1083,14 @@ function App() {
       makeInspectionId()
     );
 
+    setInspectionTimestamp(
+      Date.now()
+    );
+
     setImageFile(null);
     setImagePreview("");
     setOcrText("");
+
     setFields(
       Object.assign({}, EMPTY_FIELDS)
     );
@@ -1043,8 +1168,7 @@ function App() {
 
     if (
       !navigator.mediaDevices ||
-      !navigator.mediaDevices
-        .getUserMedia
+      !navigator.mediaDevices.getUserMedia
     ) {
       setCameraError(
         "Camera access is not supported by this browser."
@@ -1085,14 +1209,10 @@ function App() {
           videoRef.current
             .play()
             .then(function () {
-              setCameraReady(
-                true
-              );
+              setCameraReady(true);
             })
             .catch(function () {
-              setCameraReady(
-                true
-              );
+              setCameraReady(true);
             });
         }
       }, 100);
@@ -1119,8 +1239,7 @@ function App() {
     }
 
     if (videoRef.current) {
-      videoRef.current.srcObject =
-        null;
+      videoRef.current.srcObject = null;
     }
 
     setCameraReady(false);
@@ -1134,24 +1253,17 @@ function App() {
   }
 
   function capturePhoto() {
-    var video =
-      videoRef.current;
+    var video = videoRef.current;
 
-    if (
-      !video ||
-      !cameraReady
-    ) {
+    if (!video || !cameraReady) {
       showToast(
         "Camera is not ready yet."
       );
       return;
     }
 
-    var width =
-      video.videoWidth;
-
-    var height =
-      video.videoHeight;
+    var width = video.videoWidth;
+    var height = video.videoHeight;
 
     if (!width || !height) {
       showToast(
@@ -1161,9 +1273,7 @@ function App() {
     }
 
     var canvas =
-      document.createElement(
-        "canvas"
-      );
+      document.createElement("canvas");
 
     canvas.width = width;
     canvas.height = height;
@@ -1207,9 +1317,7 @@ function App() {
 
         if (
           imagePreview &&
-          imagePreview.startsWith(
-            "blob:"
-          )
+          imagePreview.startsWith("blob:")
         ) {
           URL.revokeObjectURL(
             imagePreview
@@ -1217,14 +1325,10 @@ function App() {
         }
 
         var previewUrl =
-          URL.createObjectURL(
-            file
-          );
+          URL.createObjectURL(file);
 
         setImageFile(file);
-        setImagePreview(
-          previewUrl
-        );
+        setImagePreview(previewUrl);
 
         setScanState("ready");
         setScanProgress(0);
@@ -1314,13 +1418,8 @@ function App() {
     }
   }
 
-  function updateField(
-    key,
-    value
-  ) {
-    setFields(function (
-      previous
-    ) {
+  function updateField(key, value) {
+    setFields(function (previous) {
       return Object.assign(
         {},
         previous,
@@ -1331,13 +1430,8 @@ function App() {
     });
   }
 
-  function updateInspector(
-    key,
-    value
-  ) {
-    setInspector(function (
-      previous
-    ) {
+  function updateInspector(key, value) {
+    setInspector(function (previous) {
       return Object.assign(
         {},
         previous,
@@ -1353,9 +1447,7 @@ function App() {
       Array.from(files || []);
 
     var list =
-      selected.map(function (
-        file
-      ) {
+      selected.map(function (file) {
         return {
           id:
             file.name +
@@ -1365,22 +1457,14 @@ function App() {
             Math.random(),
 
           name: file.name,
-
           size: file.size,
-
           type: file.type,
-
-          addedAt:
-            Date.now(),
+          addedAt: Date.now(),
         };
       });
 
-    setEvidence(function (
-      previous
-    ) {
-      return previous.concat(
-        list
-      );
+    setEvidence(function (previous) {
+      return previous.concat(list);
     });
 
     if (list.length) {
@@ -1392,9 +1476,7 @@ function App() {
   }
 
   function removeEvidence(id) {
-    setEvidence(function (
-      previous
-    ) {
+    setEvidence(function (previous) {
       return previous.filter(
         function (item) {
           return item.id !== id;
@@ -1404,6 +1486,19 @@ function App() {
   }
 
   function saveInspection() {
+    if (
+      !hasInspectionData(
+        fields,
+        physicalQuantity,
+        physicalUnit
+      )
+    ) {
+      showToast(
+        "Add or scan declaration information before saving the inspection."
+      );
+      return;
+    }
+
     var finalResults =
       runCompliance(
         fields,
@@ -1412,18 +1507,25 @@ function App() {
       );
 
     var finalScore =
-      scoreResults(
-        finalResults
-      );
+      scoreResults(finalResults);
 
     var automatedStatus =
-      overallStatus(
-        finalResults
-      );
+      overallStatus(finalResults);
 
     var finalStatus =
       decision ||
       automatedStatus;
+
+    /*
+     * If this is an old record, preserve its original timestamp.
+     * If it is a genuinely new record, preserve the timestamp
+     * already created for this inspection.
+     */
+    var savedTimestamp =
+      inspectionTimestamp || Date.now();
+
+    var savedDate =
+      new Date(savedTimestamp);
 
     var record = {
       id: inspectionId,
@@ -1478,26 +1580,28 @@ function App() {
         notes,
 
       date:
-        formatDate(),
+        formatDate(savedDate),
 
       time:
-        formatTime(),
+        formatTime(savedDate),
 
       timestamp:
-        Date.now(),
+        savedTimestamp,
     };
 
+    var normalizedRecord =
+      normalizeHistoryRecord(record);
+
     var next = [
-      record,
+      normalizedRecord,
       ...history.filter(
         function (item) {
-          return (
-            item.id !==
-            inspectionId
-          );
+          return item.id !== inspectionId;
         }
       ),
-    ];
+    ].sort(function (a, b) {
+      return getRecordTimestamp(b) - getRecordTimestamp(a);
+    });
 
     setHistory(next);
 
@@ -1526,69 +1630,78 @@ function App() {
   }
 
   function loadInspection(record) {
+    var normalizedRecord =
+      normalizeHistoryRecord(record);
+
     setInspectionId(
-      record.id ||
-        makeInspectionId()
+      normalizedRecord.id
+    );
+
+    /*
+     * PHASE 3 FIX:
+     * Restore the saved timestamp when available.
+     * Older records that do not have timestamp fall back
+     * to the current time only as a compatibility fallback.
+     */
+    setInspectionTimestamp(
+      normalizedRecord.timestamp
     );
 
     setImagePreview(
-      record.imagePreview || ""
+      (normalizedRecord.imagePreview &&
+      !String(normalizedRecord.imagePreview).startsWith("blob:")
+        ? normalizedRecord.imagePreview
+        : "")
     );
 
     setImageFile(null);
 
     setFields(
-      record.fields ||
-        Object.assign(
-          {},
-          EMPTY_FIELDS
-        )
+      normalizedRecord.fields
     );
 
     setOcrText(
-      record.ocrText || ""
+      normalizedRecord.ocrText || ""
     );
 
     setPhysicalQuantity(
-      record.physicalQuantity ||
+      normalizedRecord.physicalQuantity ||
         ""
     );
 
     setPhysicalUnit(
-      record.physicalUnit ||
+      normalizedRecord.physicalUnit ||
         "g"
     );
 
     setEvidence(
-      record.evidence || []
+      normalizedRecord.evidence
     );
 
     setDecision(
-      record.decision ||
-        record.status ||
+      normalizedRecord.decision ||
+        normalizedRecord.status ||
         ""
     );
 
     setNotes(
-      record.notes || ""
+      normalizedRecord.notes || ""
     );
 
     setInspector(
-      record.inspector ||
-        Object.assign(
-          {},
-          EMPTY_INSPECTOR
-        )
+      normalizedRecord.inspector
     );
 
     setScanState(
-      record.imagePreview
+      normalizedRecord.imagePreview &&
+      !String(normalizedRecord.imagePreview).startsWith("blob:")
         ? "complete"
         : "idle"
     );
 
     setScanProgress(
-      record.imagePreview
+      normalizedRecord.imagePreview &&
+      !String(normalizedRecord.imagePreview).startsWith("blob:")
         ? 100
         : 0
     );
@@ -1646,19 +1759,24 @@ function App() {
   }
 
   function generatePDF() {
-    var doc =
-      new jsPDF();
+    var doc = new jsPDF();
 
     var margin = 16;
     var y = 18;
 
-    function ensureSpace(
-      required
-    ) {
-      if (
-        y + required >
-        275
-      ) {
+    /*
+     * PHASE 3 FIX:
+     * Use the inspection's saved timestamp instead of
+     * generating today's date/time when an old inspection
+     * is reopened.
+     */
+    var reportDate =
+      new Date(
+        inspectionTimestamp || Date.now()
+      );
+
+    function ensureSpace(required) {
+      if (y + required > 275) {
         doc.addPage();
         y = 20;
       }
@@ -1684,7 +1802,7 @@ function App() {
 
       y +=
         lines.length *
-          lineHeight;
+        lineHeight;
 
       return lines;
     }
@@ -1730,7 +1848,7 @@ function App() {
 
     doc.text(
       "Date: " +
-        formatDate(),
+        formatDate(reportDate),
       margin,
       y
     );
@@ -1739,7 +1857,7 @@ function App() {
 
     doc.text(
       "Time: " +
-        formatTime(),
+        formatTime(reportDate),
       margin,
       y
     );
@@ -1858,6 +1976,18 @@ function App() {
     );
 
     y += 8;
+
+    if (!results.length) {
+      ensureSpace(25);
+
+      doc.text(
+        "No compliance checks have been activated for this inspection yet.",
+        margin,
+        y
+      );
+
+      y += 12;
+    }
 
     results.forEach(
       function (
@@ -2012,6 +2142,7 @@ function App() {
       function (item) {
         var key = item[0];
         var label = item[1];
+
         var value =
           fields[key] ||
           "Not identified";
@@ -2225,8 +2356,7 @@ function App() {
               Inspection History
             </span>
 
-            {history.length >
-              0 && (
+            {history.length > 0 && (
               <span className="nav-count">
                 {history.length}
               </span>
@@ -2283,9 +2413,7 @@ function App() {
             className="theme-button"
             onClick={function () {
               setDarkMode(
-                function (
-                  previous
-                ) {
+                function (previous) {
                   return !previous;
                 }
               );
@@ -2573,44 +2701,55 @@ function App() {
   );
 }
 
-function DashboardPage(
-  props
-) {
-  var history =
-    props.history;
+function DashboardPage(props) {
+  var history = props.history;
 
   var compliant =
-    history.filter(
-      function (item) {
-        return (
-          item.status ===
-          "COMPLIANT"
-        );
-      }
-    ).length;
+    history.filter(function (item) {
+      return item.status === "COMPLIANT";
+    }).length;
 
   var nonCompliant =
-    history.filter(
-      function (item) {
-        return (
-          item.status ===
-          "NON-COMPLIANT"
-        );
-      }
-    ).length;
+    history.filter(function (item) {
+      return item.status === "NON-COMPLIANT";
+    }).length;
 
   var review =
-    history.filter(
-      function (item) {
-        return (
-          item.status ===
-          "REVIEW REQUIRED"
-        );
-      }
-    ).length;
+    history.filter(function (item) {
+      return item.status === "REVIEW REQUIRED";
+    }).length;
 
   var recent =
     history.slice(0, 5);
+
+  /*
+   * PHASE 3 ANALYTICS
+   */
+  var averageScore =
+    history.length > 0
+      ? Math.round(
+          history.reduce(
+            function (total, item) {
+              return (
+                total +
+                Number(item.score || 0)
+              );
+            },
+            0
+          ) / history.length
+        )
+      : 0;
+
+  var passRate =
+    history.length > 0
+      ? Math.round(
+          (compliant / history.length) *
+            100
+        )
+      : 0;
+
+  var attentionCount =
+    nonCompliant + review;
 
   return (
     <div className="page">
@@ -2770,6 +2909,83 @@ function DashboardPage(
           tone="amber"
         />
       </div>
+
+      {/* PHASE 3 ANALYTICS PANEL */}
+      <section
+        className="panel"
+        style={{
+          marginTop: "14px",
+        }}
+      >
+        <div className="panel-header">
+          <div>
+            <span className="panel-kicker">
+              PERFORMANCE
+            </span>
+
+            <h3>
+              Inspection performance
+            </h3>
+          </div>
+
+          <span className="section-date">
+            {history.length
+              ? "Based on saved inspections"
+              : "Awaiting inspection data"}
+          </span>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(3, minmax(0, 1fr))",
+            gap: "12px",
+          }}
+        >
+          <AnalyticsMetric
+            label="Average Score"
+            value={
+              history.length
+                ? averageScore + "%"
+                : "—"
+            }
+            caption={
+              history.length
+                ? "Across all saved inspections"
+                : "Complete inspections to calculate"
+            }
+          />
+
+          <AnalyticsMetric
+            label="Pass Rate"
+            value={
+              history.length
+                ? passRate + "%"
+                : "—"
+            }
+            caption={
+              history.length
+                ? "Inspections marked compliant"
+                : "No inspection outcomes yet"
+            }
+          />
+
+          <AnalyticsMetric
+            label="Needs Attention"
+            value={
+              history.length
+                ? attentionCount
+                : "—"
+            }
+            caption={
+              history.length
+                ? "Non-compliant + review required"
+                : "No attention items yet"
+            }
+          />
+        </div>
+      </section>
 
       <div className="dashboard-grid">
         <section className="panel recent-panel">
@@ -2968,6 +3184,55 @@ function DashboardPage(
   );
 }
 
+function AnalyticsMetric(props) {
+  return (
+    <div
+      style={{
+        padding: "16px",
+        borderRadius: "14px",
+        border:
+          "1px solid var(--border, rgba(100,120,150,0.18))",
+        background:
+          "var(--surface-soft, rgba(100,120,150,0.04))",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "12px",
+          fontWeight: 700,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          opacity: 0.7,
+          marginBottom: "8px",
+        }}
+      >
+        {props.label}
+      </div>
+
+      <div
+        style={{
+          fontSize: "28px",
+          fontWeight: 800,
+          lineHeight: 1.1,
+          marginBottom: "6px",
+        }}
+      >
+        {props.value}
+      </div>
+
+      <div
+        style={{
+          fontSize: "12px",
+          lineHeight: 1.4,
+          opacity: 0.65,
+        }}
+      >
+        {props.caption}
+      </div>
+    </div>
+  );
+}
+
 function StatCard(props) {
   return (
     <div
@@ -3000,9 +3265,7 @@ function StatCard(props) {
   );
 }
 
-function WorkflowStep(
-  props
-) {
+function WorkflowStep(props) {
   return (
     <div className="workflow-step">
       <div className="workflow-number">
@@ -3022,9 +3285,7 @@ function WorkflowStep(
   );
 }
 
-function ScannerPage(
-  props
-) {
+function ScannerPage(props) {
   var [showOCR, setShowOCR] =
     useState(false);
 
@@ -3913,7 +4174,9 @@ function ScannerPage(
                         .status
                     }
                   </strong>
+
                   <br />
+
                   {
                     props
                       .quantityVerification
@@ -4172,57 +4435,42 @@ function ScannerPage(
   );
 }
 
-function CameraModal(
-  props
-) {
+function CameraModal(props) {
   return (
     <div
       style={{
-        position:
-          "fixed",
+        position: "fixed",
         inset: 0,
         zIndex: 9999,
         background:
           "rgba(4, 12, 28, 0.88)",
-        display:
-          "flex",
-        alignItems:
-          "center",
-        justifyContent:
-          "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         padding: "20px",
       }}
     >
       <div
         style={{
-          width:
-            "min(900px, 100%)",
-          maxHeight:
-            "92vh",
-          overflow:
-            "auto",
+          width: "min(900px, 100%)",
+          maxHeight: "92vh",
+          overflow: "auto",
           background:
             "var(--surface, #ffffff)",
-          borderRadius:
-            "22px",
-          padding:
-            "20px",
+          borderRadius: "22px",
+          padding: "20px",
           boxShadow:
             "0 25px 80px rgba(0,0,0,0.35)",
         }}
       >
         <div
           style={{
-            display:
-              "flex",
+            display: "flex",
             justifyContent:
               "space-between",
-            alignItems:
-              "center",
-            marginBottom:
-              "16px",
-            gap:
-              "12px",
+            alignItems: "center",
+            marginBottom: "16px",
+            gap: "12px",
           }}
         >
           <div>
@@ -4232,8 +4480,7 @@ function CameraModal(
 
             <h2
               style={{
-                margin:
-                  "4px 0 0",
+                margin: "4px 0 0",
               }}
             >
               Capture package image
@@ -4258,8 +4505,7 @@ function CameraModal(
           <div
             className="error-box"
             style={{
-              marginBottom:
-                "16px",
+              marginBottom: "16px",
             }}
           >
             <div className="error-icon">
@@ -4284,22 +4530,14 @@ function CameraModal(
         ) : (
           <div
             style={{
-              position:
-                "relative",
-              background:
-                "#050b14",
-              borderRadius:
-                "18px",
-              overflow:
-                "hidden",
-              minHeight:
-                "360px",
-              display:
-                "flex",
-              alignItems:
-                "center",
-              justifyContent:
-                "center",
+              position: "relative",
+              background: "#050b14",
+              borderRadius: "18px",
+              overflow: "hidden",
+              minHeight: "360px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             <video
@@ -4310,46 +4548,33 @@ function CameraModal(
               playsInline
               muted
               style={{
-                display:
-                  "block",
-                width:
-                  "100%",
-                maxHeight:
-                  "65vh",
-                objectFit:
-                  "contain",
+                display: "block",
+                width: "100%",
+                maxHeight: "65vh",
+                objectFit: "contain",
               }}
             />
 
             <div
               style={{
-                position:
-                  "absolute",
-                inset:
-                  "12%",
+                position: "absolute",
+                inset: "12%",
                 border:
                   "2px solid rgba(255,255,255,0.8)",
-                borderRadius:
-                  "12px",
-                pointerEvents:
-                  "none",
+                borderRadius: "12px",
+                pointerEvents: "none",
               }}
             />
 
             <div
               style={{
-                position:
-                  "absolute",
+                position: "absolute",
                 left: 0,
                 right: 0,
-                bottom:
-                  "20px",
-                textAlign:
-                  "center",
-                color:
-                  "white",
-                fontSize:
-                  "13px",
+                bottom: "20px",
+                textAlign: "center",
+                color: "white",
+                fontSize: "13px",
                 textShadow:
                   "0 2px 8px rgba(0,0,0,0.8)",
               }}
@@ -4362,16 +4587,11 @@ function CameraModal(
 
         <div
           style={{
-            display:
-              "flex",
-            justifyContent:
-              "center",
-            gap:
-              "12px",
-            marginTop:
-              "18px",
-            flexWrap:
-              "wrap",
+            display: "flex",
+            justifyContent: "center",
+            gap: "12px",
+            marginTop: "18px",
+            flexWrap: "wrap",
           }}
         >
           <button
@@ -4411,9 +4631,7 @@ function CameraModal(
   );
 }
 
-function PageTitle(
-  props
-) {
+function PageTitle(props) {
   return (
     <div className="page-title">
       <div>
@@ -4435,9 +4653,7 @@ function PageTitle(
   );
 }
 
-function ProgressStep(
-  props
-) {
+function ProgressStep(props) {
   return (
     <div
       className={
@@ -4458,11 +4674,8 @@ function ProgressStep(
   );
 }
 
-function RuleCard(
-  props
-) {
-  var rule =
-    props.rule;
+function RuleCard(props) {
+  var rule = props.rule;
 
   return (
     <div
@@ -4474,8 +4687,7 @@ function RuleCard(
       <div className="rule-status-icon">
         <Icon
           name={
-            rule.status ===
-            "PASS"
+            rule.status === "PASS"
               ? "check"
               : "warning"
           }
@@ -4523,12 +4735,9 @@ function RuleCard(
           "FAIL" && (
           <small
             style={{
-              display:
-                "block",
-              marginTop:
-                "6px",
-              opacity:
-                0.75,
+              display: "block",
+              marginTop: "6px",
+              opacity: 0.75,
             }}
           >
             Rule support:{" "}
@@ -4542,9 +4751,7 @@ function RuleCard(
   );
 }
 
-function SummaryLine(
-  props
-) {
+function SummaryLine(props) {
   return (
     <div className="summary-line">
       <span>
@@ -4566,11 +4773,47 @@ function SummaryLine(
   );
 }
 
-function HistoryPage(
-  props
-) {
+function HistoryPage(props) {
+  var total =
+    props.allHistory.length;
+
+  var compliant =
+    props.allHistory.filter(
+      function (item) {
+        return (
+          item.status ===
+          "COMPLIANT"
+        );
+      }
+    ).length;
+
+  var nonCompliant =
+    props.allHistory.filter(
+      function (item) {
+        return (
+          item.status ===
+          "NON-COMPLIANT"
+        );
+      }
+    ).length;
+
+  var review =
+    props.allHistory.filter(
+      function (item) {
+        return (
+          item.status ===
+          "REVIEW REQUIRED"
+        );
+      }
+    ).length;
+
   return (
-    <div className="page">
+    <div
+      className="page"
+      style={{
+        paddingTop: "10px",
+      }}
+    >
       <PageTitle
         eyebrow="RECORDS"
         title="Inspection history"
@@ -4591,6 +4834,45 @@ function HistoryPage(
           </button>
         }
       />
+
+      {/* PHASE 3 HISTORY SUMMARY */}
+      {total > 0 && (
+        <section
+          className="panel"
+          style={{
+            marginBottom: "14px",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(4, minmax(0, 1fr))",
+              gap: "10px",
+            }}
+          >
+            <HistoryMetric
+              label="Total"
+              value={total}
+            />
+
+            <HistoryMetric
+              label="Compliant"
+              value={compliant}
+            />
+
+            <HistoryMetric
+              label="Non-Compliant"
+              value={nonCompliant}
+            />
+
+            <HistoryMetric
+              label="Review"
+              value={review}
+            />
+          </div>
+        </section>
+      )}
 
       <div className="history-toolbar">
         <div className="search-box">
@@ -4838,6 +5120,43 @@ function HistoryPage(
   );
 }
 
+function HistoryMetric(props) {
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        borderRadius: "12px",
+        background:
+          "var(--surface-soft, rgba(100,120,150,0.04))",
+        border:
+          "1px solid var(--border, rgba(100,120,150,0.16))",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "11px",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          opacity: 0.65,
+        }}
+      >
+        {props.label}
+      </div>
+
+      <strong
+        style={{
+          display: "block",
+          marginTop: "5px",
+          fontSize: "22px",
+        }}
+      >
+        {props.value}
+      </strong>
+    </div>
+  );
+}
+
 function AboutPage() {
   return (
     <div className="page">
@@ -4949,9 +5268,7 @@ function AboutPage() {
   );
 }
 
-function AboutCard(
-  props
-) {
+function AboutCard(props) {
   return (
     <div className="panel about-card">
       <div className="about-card-icon">
