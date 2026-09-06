@@ -1011,23 +1011,28 @@ function scoreResults(results) {
 }
 
 function overallStatus(results) {
-  if (!results.length) {
+  if (!Array.isArray(results) || !results.length) {
     return "NOT SCANNED";
   }
 
-  var failures = results.filter(function (item) {
-    return item.status === "FAIL";
-  }).length;
+  var applicable = results.filter(function (item) {
+    return item.status !== "NOT APPLICABLE";
+  });
 
-  if (failures === 0) {
-    return "COMPLIANT";
-  }
-
-  if (failures <= 2) {
+  if (!applicable.length) {
     return "REVIEW REQUIRED";
   }
 
-  return "NON-COMPLIANT";
+  var attentionRequired = applicable.some(function (item) {
+    return item.status !== "PASS";
+  });
+
+  /*
+   * OCR/rule screening can confirm that a declaration was detected,
+   * but it must not automatically create an enforcement finding.
+   * Missing or uncertain declarations therefore remain in inspector review.
+   */
+  return attentionRequired ? "REVIEW REQUIRED" : "COMPLIANT";
 }
 
 function Icon(props) {
@@ -1145,7 +1150,10 @@ function buildInspectionIntelligence(fields, results, quantityVerification, ocrC
   });
 
   var failed = results.filter(function (item) {
-    return item.status === "FAIL";
+    return (
+      item.status !== "PASS" &&
+      item.status !== "NOT APPLICABLE"
+    );
   });
 
   var actions = [];
@@ -1190,6 +1198,85 @@ function buildInspectionIntelligence(fields, results, quantityVerification, ocrC
     actions: actions,
     readiness: Math.round(clampNumber(readiness, 0, 100)),
   };
+}
+
+async function prepareImageForOCR(source) {
+  /*
+   * Tesseract can consume a lot of memory with modern phone photos.
+   * Downscale large raster images before OCR while keeping enough detail
+   * for package-label text. If the browser cannot decode the image, the
+   * original source is returned and Tesseract gets a chance to handle it.
+   */
+  if (
+    typeof window === "undefined" ||
+    typeof document === "undefined" ||
+    !(source instanceof Blob)
+  ) {
+    return source;
+  }
+
+  var objectUrl = "";
+
+  try {
+    objectUrl = URL.createObjectURL(source);
+
+    var image = await new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        resolve(img);
+      };
+      img.onerror = function () {
+        reject(new Error("Image decode failed"));
+      };
+      img.src = objectUrl;
+    });
+
+    var width = image.naturalWidth || image.width;
+    var height = image.naturalHeight || image.height;
+    var maxDimension = 2000;
+
+    if (!width || !height || Math.max(width, height) <= maxDimension) {
+      return source;
+    }
+
+    var scale = maxDimension / Math.max(width, height);
+    var outputWidth = Math.max(1, Math.round(width * scale));
+    var outputHeight = Math.max(1, Math.round(height * scale));
+    var canvas = document.createElement("canvas");
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+
+    var context = canvas.getContext("2d", { alpha: false });
+
+    if (!context) {
+      return source;
+    }
+
+    context.drawImage(image, 0, 0, outputWidth, outputHeight);
+
+    var blob = await new Promise(function (resolve) {
+      canvas.toBlob(
+        function (value) {
+          resolve(value);
+        },
+        "image/jpeg",
+        0.9
+      );
+    });
+
+    return blob || source;
+  } catch (error) {
+    console.warn("MetroCheck OCR preprocessing skipped:", error);
+    return source;
+  } finally {
+    if (objectUrl) {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  }
 }
 
 function getEnvironmentReadiness() {
@@ -1345,6 +1432,9 @@ function App() {
 
   var videoRef = useRef(null);
   var streamRef = useRef(null);
+  var frontCameraInputRef = useRef(null);
+  var backCameraInputRef = useRef(null);
+  var activeCameraSideRef = useRef("front");
 
   useEffect(function () {
     var allHistory = getAllStoredHistory();
@@ -1442,22 +1532,29 @@ function App() {
 
     video.srcObject = stream;
 
-    var playPromise = video.play();
-
-    if (playPromise && typeof playPromise.then === "function") {
-      playPromise
-        .then(function () {
-          setCameraReady(true);
-        })
-        .catch(function () {
-          /* The video element can already be playing on some browsers. */
-          setCameraReady(true);
-        });
-    } else {
-      setCameraReady(true);
+    function markReady() {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setCameraReady(true);
+      }
     }
 
+    video.addEventListener("loadedmetadata", markReady);
+    video.addEventListener("canplay", markReady);
+
+    var playPromise = video.play();
+
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(function (error) {
+        console.warn("Camera preview play was delayed:", error);
+      });
+    }
+
+    markReady();
+
     return function () {
+      video.removeEventListener("loadedmetadata", markReady);
+      video.removeEventListener("canplay", markReady);
+
       if (video.srcObject === stream) {
         video.srcObject = null;
       }
@@ -1564,7 +1661,10 @@ function App() {
 
   var failedCount =
     results.filter(function (item) {
-      return item.status === "FAIL";
+      return (
+        item.status !== "PASS" &&
+        item.status !== "NOT APPLICABLE"
+      );
     }).length;
 
   var filteredHistory = useMemo(
@@ -1690,9 +1790,27 @@ function App() {
       return;
     }
 
-    if (!file.type.startsWith("image/")) {
+    var fileType = String(file.type || "").toLowerCase();
+    var fileName = String(file.name || "").toLowerCase();
+    var looksLikeImage =
+      fileType.startsWith("image/") ||
+      /\.(jpe?g|png|webp|heic|heif)$/i.test(fileName);
+
+    if (!looksLikeImage) {
       showToast(
-        "Please select an image file."
+        "Please select a JPG, PNG, WEBP, HEIC or HEIF image."
+      );
+      return;
+    }
+
+    /*
+     * Very large phone photos can exhaust browser memory while OCR is
+     * running. Keep the original for preview, but reject unusually large
+     * files before they can crash a mobile tab.
+     */
+    if (Number(file.size || 0) > 25 * 1024 * 1024) {
+      showToast(
+        "This image is larger than 25 MB. Please capture or choose a smaller image."
       );
       return;
     }
@@ -1704,109 +1822,92 @@ function App() {
         ? "front"
         : selectedImageSide;
 
-    var previousImage =
-      packageImages[targetSide];
+    var previewUrl;
 
-    if (
-      previousImage &&
-      previousImage.preview &&
-      previousImage.preview.startsWith("blob:")
-    ) {
-      URL.revokeObjectURL(
-        previousImage.preview
+    try {
+      previewUrl = URL.createObjectURL(file);
+    } catch (error) {
+      console.error("MetroCheck image preview failed:", error);
+      showToast(
+        "This image could not be opened by the browser. Please try another photo."
       );
+      return;
     }
 
-    var previewUrl =
-      URL.createObjectURL(file);
+    setPackageImages(function (previous) {
+      var previousImage = previous[targetSide];
 
-    var nextImages = Object.assign(
-      {},
-      packageImages,
-      {
+      if (
+        previousImage &&
+        previousImage.preview &&
+        previousImage.preview.startsWith("blob:")
+      ) {
+        try {
+          URL.revokeObjectURL(previousImage.preview);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      return Object.assign({}, previous, {
         [targetSide]: {
           file: file,
           preview: previewUrl,
         },
-      }
-    );
-
-    setPackageImages(nextImages);
+      });
+    });
 
     /*
-     * Keep the legacy single-image state pointed at the
-     * newest selected panel so existing workflow logic,
-     * intelligence and compatibility continue to work.
+     * Keep the legacy single-image state pointed at the newest selected
+     * panel so the rest of the existing workflow remains compatible.
      */
     setImageFile(file);
     setImagePreview(previewUrl);
     setSelectedImageSide(targetSide);
+    activeCameraSideRef.current = targetSide;
 
     setScanState("ready");
     setScanProgress(0);
     setOcrText("");
     setOCRConfidence(null);
     setFieldSources({});
-
-    setFields(
-      Object.assign({}, EMPTY_FIELDS)
-    );
+    setFields(Object.assign({}, EMPTY_FIELDS));
 
     showToast(
-      (targetSide === "front"
-        ? "Front"
-        : "Back") +
+      (targetSide === "front" ? "Front" : "Back") +
         " package image loaded."
     );
   }
 
-  async function openCamera() {
+  function openCamera(side) {
+    var targetSide = side === "back" ? "back" : "front";
+
+    /*
+     * Camera ownership is intentionally kept inside CameraModal.
+     * The modal is mounted FIRST, then it requests getUserMedia. This avoids
+     * the old race where permission/stream creation happened before the
+     * <video> element existed, which could leave a black or blank camera view
+     * on Safari, Chrome and mobile browsers.
+     */
+    activeCameraSideRef.current = targetSide;
+    setSelectedImageSide(targetSide);
     setCameraError("");
     setCameraReady(false);
+    setCameraOpen(true);
+  }
 
-    if (
-      !navigator.mediaDevices ||
-      !navigator.mediaDevices.getUserMedia
-    ) {
-      setCameraError(
-        "Camera access is not supported by this browser."
-      );
-
-      setCameraOpen(true);
+  function handleCameraFile(file, side) {
+    if (!file) {
       return;
     }
 
-    try {
-      var stream =
-        await navigator.mediaDevices.getUserMedia(
-          {
-            video: {
-              facingMode: {
-                ideal: "environment",
-              },
-              width: {
-                ideal: 1920,
-              },
-              height: {
-                ideal: 1080,
-              },
-            },
-            audio: false,
-          }
-        );
-
-      streamRef.current = stream;
-
-      setCameraOpen(true);
-    } catch (error) {
-      console.error(error);
-
-      setCameraOpen(true);
-
-      setCameraError(
-        "Camera permission was denied or the camera could not be opened."
-      );
-    }
+    var targetSide = side === "back" ? "back" : "front";
+    activeCameraSideRef.current = targetSide;
+    setSelectedImageSide(targetSide);
+    handleImage(file, targetSide);
+    setCameraOpen(false);
+    setCameraError("");
+    setCameraReady(false);
   }
 
   function stopCamera() {
@@ -1887,12 +1988,17 @@ function App() {
       }
 
       try {
+        var captureSide =
+          activeCameraSideRef.current === "back"
+            ? "back"
+            : "front";
+
         var file =
           typeof File === "function"
             ? new File(
                 [blob],
                 "MetroCheck-" +
-                  selectedImageSide +
+                  captureSide +
                   "-Capture-" +
                   Date.now() +
                   ".jpg",
@@ -1905,7 +2011,7 @@ function App() {
               });
 
         var previousImage =
-          packageImages[selectedImageSide];
+          packageImages[captureSide];
 
         if (
           previousImage &&
@@ -1924,7 +2030,7 @@ function App() {
           {},
           packageImages,
           {
-            [selectedImageSide]: {
+            [captureSide]: {
               file: file,
               preview: previewUrl,
             },
@@ -1951,7 +2057,7 @@ function App() {
         closeCamera();
 
         showToast(
-          (selectedImageSide === "front"
+          (captureSide === "front"
             ? "Front"
             : "Back") +
             " photo captured successfully."
@@ -2087,9 +2193,18 @@ function App() {
           )
         );
 
+        var sourceForOCR =
+          entry.item.file ||
+          entry.item.preview;
+
+        var preparedSource =
+          await prepareImageForOCR(
+            sourceForOCR
+          );
+
         var response =
           await worker.recognize(
-            entry.item.preview
+            preparedSource
           );
 
         var sideText = normalizeText(
@@ -3299,6 +3414,59 @@ function App() {
 
   return (
     <div className="app-shell">
+      {/* Native mobile camera inputs. Kept mounted so iOS/Android can
+          open the camera directly from the user's tap. */}
+      <input
+        ref={frontCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{
+          position: "fixed",
+          left: "-10000px",
+          top: "-10000px",
+          width: "1px",
+          height: "1px",
+          opacity: 0,
+          pointerEvents: "none",
+        }}
+        onChange={function (event) {
+          var file =
+            event.target.files && event.target.files[0];
+
+          if (file) {
+            handleImage(file, "front");
+          }
+
+          event.target.value = "";
+        }}
+      />
+
+      <input
+        ref={backCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{
+          position: "fixed",
+          left: "-10000px",
+          top: "-10000px",
+          width: "1px",
+          height: "1px",
+          opacity: 0,
+          pointerEvents: "none",
+        }}
+        onChange={function (event) {
+          var file =
+            event.target.files && event.target.files[0];
+
+          if (file) {
+            handleImage(file, "back");
+          }
+
+          event.target.value = "";
+        }}
+      />
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -3698,6 +3866,9 @@ function App() {
             }
             onOpenCamera={
               openCamera
+            }
+            onCameraFile={
+              handleCameraFile
             }
             onCloseCamera={
               closeCamera
@@ -4564,7 +4735,6 @@ function ScannerPage(props) {
                             <input
                               type="file"
                               accept="image/*"
-                              capture="environment"
                               onChange={function (
                                 event
                               ) {
@@ -4605,7 +4775,6 @@ function ScannerPage(props) {
                           <input
                             type="file"
                             accept="image/*"
-                            capture="environment"
                             onChange={function (
                               event
                             ) {
@@ -4662,7 +4831,7 @@ function ScannerPage(props) {
                           props.onSelectImageSide(
                             side
                           );
-                          props.onOpenCamera();
+                          props.onOpenCamera(side);
                         }}
                       >
                         <Icon
@@ -5726,24 +5895,9 @@ function ScannerPage(props) {
 
       {props.cameraOpen && (
         <CameraModal
-          videoRef={
-            props.videoRef
-          }
-          cameraError={
-            props.cameraError
-          }
-          cameraReady={
-            props.cameraReady
-          }
-          onClose={
-            props.onCloseCamera
-          }
-          onCapture={
-            props.onCapturePhoto
-          }
-          selectedSide={
-            selectedImageSide
-          }
+          onClose={props.onCloseCamera}
+          onCaptureFile={props.onCameraFile}
+          selectedSide={props.selectedImageSide}
         />
       )}
     </div>
@@ -5751,152 +5905,573 @@ function ScannerPage(props) {
 }
 
 function CameraModal(props) {
+  var videoRef = useRef(null);
+  var streamRef = useRef(null);
+  var nativeCaptureRef = useRef(null);
+  var mountedRef = useRef(true);
+
+  var [cameraStatus, setCameraStatus] = useState("starting");
+  var [cameraMessage, setCameraMessage] = useState("");
+  var [captureBusy, setCaptureBusy] = useState(false);
+
+  var selectedSide = props.selectedSide === "back" ? "back" : "front";
+
+  function stopLocalCamera() {
+    var stream = streamRef.current;
+
+    if (stream) {
+      try {
+        stream.getTracks().forEach(function (track) {
+          track.stop();
+        });
+      } catch (error) {
+        console.warn("MetroCheck camera cleanup warning:", error);
+      }
+
+      streamRef.current = null;
+    }
+
+    var video = videoRef.current;
+    if (video) {
+      try {
+        video.pause();
+      } catch (error) {
+        console.warn(error);
+      }
+
+      try {
+        video.srcObject = null;
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+  }
+
+  useEffect(function () {
+    mountedRef.current = true;
+    var cancelled = false;
+    var readyTimer = null;
+
+    function finishWithFallback(message) {
+      if (cancelled || !mountedRef.current) {
+        return;
+      }
+
+      stopLocalCamera();
+      setCameraMessage(message || "Live camera is unavailable in this browser.");
+      setCameraStatus("fallback");
+    }
+
+    function waitForVideo(video) {
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var timeout = window.setTimeout(function () {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          cleanup();
+          reject(new Error("Camera preview timed out"));
+        }, 8000);
+
+        function cleanup() {
+          window.clearTimeout(timeout);
+          video.removeEventListener("loadedmetadata", onReady);
+          video.removeEventListener("canplay", onReady);
+          video.removeEventListener("playing", onReady);
+          video.removeEventListener("error", onError);
+        }
+
+        function onReady() {
+          if (settled) {
+            return;
+          }
+
+          if (video.videoWidth > 0 && video.videoHeight > 0) {
+            settled = true;
+            cleanup();
+            resolve();
+          }
+        }
+
+        function onError() {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          cleanup();
+          reject(new Error("Camera preview could not be displayed"));
+        }
+
+        video.addEventListener("loadedmetadata", onReady);
+        video.addEventListener("canplay", onReady);
+        video.addEventListener("playing", onReady);
+        video.addEventListener("error", onError);
+
+        onReady();
+      });
+    }
+
+    async function startCamera() {
+      setCameraStatus("starting");
+      setCameraMessage("");
+
+      /*
+       * getUserMedia is only available in a secure context on normal web
+       * pages. localhost is treated as secure. A phone opening the Vite app
+       * through http://192.168.x.x:5173 is NOT secure, so we immediately use
+       * the native camera input instead of showing a black/blank preview.
+       */
+      if (
+        !window.isSecureContext ||
+        !navigator.mediaDevices ||
+        typeof navigator.mediaDevices.getUserMedia !== "function"
+      ) {
+        finishWithFallback(
+          window.isSecureContext
+            ? "Live camera is not supported by this browser. Use the camera button below."
+            : "Live browser camera requires HTTPS or localhost. Use the device camera button below, or open MetroCheck through HTTPS/localhost."
+        );
+        return;
+      }
+
+      var stream = null;
+
+      try {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          });
+        } catch (preferredError) {
+          console.warn(
+            "MetroCheck preferred camera constraints failed; retrying default camera:",
+            preferredError
+          );
+
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
+
+        if (cancelled || !mountedRef.current) {
+          if (stream) {
+            stream.getTracks().forEach(function (track) {
+              track.stop();
+            });
+          }
+          return;
+        }
+
+        if (!stream || !stream.getVideoTracks || stream.getVideoTracks().length === 0) {
+          throw new Error("No video track was returned by the browser");
+        }
+
+        streamRef.current = stream;
+
+        var video = videoRef.current;
+        if (!video) {
+          throw new Error("Camera preview element is not available");
+        }
+
+        video.srcObject = stream;
+        video.muted = true;
+        video.playsInline = true;
+        video.autoplay = true;
+
+        try {
+          var playResult = video.play();
+          if (playResult && typeof playResult.catch === "function") {
+            playResult.catch(function (playError) {
+              /*
+               * Some Safari versions reject the first programmatic play even
+               * for a muted inline video. Do not block camera initialization
+               * on that promise; metadata/canplay can still make the stream
+               * usable and waitForVideo has its own timeout.
+               */
+              console.warn("MetroCheck camera play warning:", playError);
+            });
+          }
+        } catch (playError) {
+          console.warn("MetroCheck camera play warning:", playError);
+        }
+
+        await waitForVideo(video);
+
+        if (cancelled || !mountedRef.current) {
+          return;
+        }
+
+        setCameraStatus("ready");
+        setCameraMessage("");
+      } catch (error) {
+        console.error("MetroCheck live camera failed:", error);
+
+        var errorName = error && error.name ? String(error.name) : "";
+        var message =
+          errorName === "NotAllowedError" || errorName === "SecurityError"
+            ? "Camera permission is blocked. Allow camera access for this site, then reopen Capture. You can also use the device camera button below."
+            : errorName === "NotFoundError" || errorName === "DevicesNotFoundError"
+            ? "No usable camera was found on this device."
+            : errorName === "NotReadableError" || errorName === "TrackStartError"
+            ? "The camera is busy in another app or browser tab. Close the other camera app and try again."
+            : "The live camera could not start. Use the device camera button below.";
+
+        finishWithFallback(message);
+      }
+    }
+
+    /*
+     * Defer one animation frame so the <video> element is definitely mounted
+     * before getUserMedia resolves and the stream is attached to it.
+     */
+    readyTimer = window.requestAnimationFrame(function () {
+      startCamera();
+    });
+
+    return function () {
+      cancelled = true;
+      mountedRef.current = false;
+
+      if (readyTimer !== null) {
+        window.cancelAnimationFrame(readyTimer);
+      }
+
+      stopLocalCamera();
+    };
+  }, [selectedSide]);
+
+  function createCapturedFile(blob) {
+    var fileName =
+      "MetroCheck-" +
+      selectedSide +
+      "-Capture-" +
+      Date.now() +
+      ".jpg";
+
+    try {
+      if (typeof File === "function") {
+        return new File([blob], fileName, {
+          type: "image/jpeg",
+          lastModified: Date.now(),
+        });
+      }
+    } catch (error) {
+      console.warn("File constructor unavailable; using Blob:", error);
+    }
+
+    blob.name = fileName;
+    return blob;
+  }
+
+  function canvasToJpegBlob(canvas) {
+    return new Promise(function (resolve, reject) {
+      if (typeof canvas.toBlob === "function") {
+        canvas.toBlob(
+          function (blob) {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error("Camera capture returned an empty image"));
+            }
+          },
+          "image/jpeg",
+          0.9
+        );
+        return;
+      }
+
+      try {
+        var dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+        var pieces = dataUrl.split(",");
+        var binary = atob(pieces[1] || "");
+        var bytes = new Uint8Array(binary.length);
+
+        for (var index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+
+        resolve(
+          new Blob([bytes], {
+            type: "image/jpeg",
+          })
+        );
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  async function captureLivePhoto() {
+    if (captureBusy || cameraStatus !== "ready") {
+      return;
+    }
+
+    var video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setCameraMessage("The camera is still starting. Wait a moment and try again.");
+      return;
+    }
+
+    setCaptureBusy(true);
+
+    try {
+      var sourceWidth = video.videoWidth;
+      var sourceHeight = video.videoHeight;
+
+      /*
+       * Cap the captured frame to 1920 px on its longest edge. This keeps OCR
+       * detail while preventing large mobile canvases from exhausting memory.
+       */
+      var longestEdge = Math.max(sourceWidth, sourceHeight);
+      var scale = longestEdge > 1920 ? 1920 / longestEdge : 1;
+      var targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+      var targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+
+      var canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+
+      var context = canvas.getContext("2d", {
+        alpha: false,
+      });
+
+      if (!context) {
+        throw new Error("Canvas is unavailable");
+      }
+
+      context.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+      var blob = await canvasToJpegBlob(canvas);
+      var file = createCapturedFile(blob);
+
+      stopLocalCamera();
+
+      if (typeof props.onCaptureFile === "function") {
+        props.onCaptureFile(file, selectedSide);
+      }
+    } catch (error) {
+      console.error("MetroCheck photo capture failed:", error);
+      setCameraMessage(
+        "The photo could not be captured. Try the device camera button below."
+      );
+      setCameraStatus("fallback");
+      stopLocalCamera();
+    } finally {
+      if (mountedRef.current) {
+        setCaptureBusy(false);
+      }
+    }
+  }
+
+  function handleNativeCapture(event) {
+    var file = event.target.files && event.target.files[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    stopLocalCamera();
+
+    if (typeof props.onCaptureFile === "function") {
+      props.onCaptureFile(file, selectedSide);
+    }
+  }
+
+  function closeModal() {
+    stopLocalCamera();
+    if (typeof props.onClose === "function") {
+      props.onClose();
+    }
+  }
+
+  var isStarting = cameraStatus === "starting";
+  var isReady = cameraStatus === "ready";
+  var useFallback = cameraStatus === "fallback";
+
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={"Capture " + selectedSide + " package photo"}
       style={{
         position: "fixed",
         inset: 0,
         zIndex: 9999,
-        background:
-          "rgba(4, 12, 28, 0.88)",
+        background: "rgba(4, 12, 28, 0.92)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: "20px",
+        padding: "14px",
+        overflowY: "auto",
       }}
     >
       <div
         style={{
           width: "min(900px, 100%)",
-          maxHeight: "92vh",
-          overflow: "auto",
-          background:
-            "var(--surface, #ffffff)",
-          borderRadius: "22px",
-          padding: "20px",
-          boxShadow:
-            "0 25px 80px rgba(0,0,0,0.35)",
+          maxHeight: "94vh",
+          overflowY: "auto",
+          background: "var(--surface, #ffffff)",
+          color: "var(--text, #172033)",
+          borderRadius: "20px",
+          padding: "18px",
+          boxShadow: "0 25px 80px rgba(0,0,0,0.35)",
         }}
       >
         <div
           style={{
             display: "flex",
-            justifyContent:
-              "space-between",
+            justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: "16px",
+            marginBottom: "14px",
             gap: "12px",
           }}
         >
           <div>
-            <span className="panel-kicker">
-              LIVE CAMERA
-            </span>
-
-            <h2
-              style={{
-                margin: "4px 0 0",
-              }}
-            >
-              Capture {props.selectedSide === "front" ? "front" : "back"} side
+            <span className="panel-kicker">LIVE CAMERA</span>
+            <h2 style={{ margin: "4px 0 0", fontSize: "20px" }}>
+              Capture {selectedSide === "front" ? "front" : "back"} side
             </h2>
           </div>
 
           <button
+            type="button"
             className="icon-button"
-            onClick={
-              props.onClose
-            }
+            onClick={closeModal}
             title="Close camera"
           >
-            <Icon
-              name="close"
-              size={22}
-            />
+            <Icon name="close" size={22} />
           </button>
         </div>
 
-        {props.cameraError ? (
-          <div
-            className="error-box"
+        <div
+          style={{
+            position: "relative",
+            background: "#050b14",
+            borderRadius: "16px",
+            overflow: "hidden",
+            minHeight: "280px",
+            height: "min(60vh, 560px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            disablePictureInPicture
             style={{
-              marginBottom: "16px",
-            }}
-          >
-            <div className="error-icon">
-              <Icon
-                name="warning"
-                size={18}
-              />
-            </div>
-
-            <div>
-              <strong>
-                Camera unavailable
-              </strong>
-
-              <p>
-                {
-                  props.cameraError
-                }
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div
-            style={{
-              position: "relative",
+              display: isReady || isStarting ? "block" : "none",
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
               background: "#050b14",
-              borderRadius: "18px",
-              overflow: "hidden",
-              minHeight: "360px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
             }}
-          >
-            <video
-              ref={
-                props.videoRef
-              }
-              autoPlay
-              playsInline
-              muted
-              style={{
-                display: "block",
-                width: "100%",
-                maxHeight: "65vh",
-                objectFit: "contain",
-              }}
-            />
+          />
 
+          {isStarting && (
             <div
               style={{
                 position: "absolute",
-                inset: "12%",
-                border:
-                  "2px solid rgba(255,255,255,0.8)",
-                borderRadius: "12px",
-                pointerEvents: "none",
-              }}
-            />
-
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: "20px",
-                textAlign: "center",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "column",
+                gap: "10px",
                 color: "white",
-                fontSize: "13px",
-                textShadow:
-                  "0 2px 8px rgba(0,0,0,0.8)",
+                padding: "20px",
+                textAlign: "center",
               }}
             >
-              Align the {props.selectedSide === "front" ? "front" : "back"} side
-              inside the frame
+              <Icon name="camera" size={34} />
+              <strong>Starting camera…</strong>
+              <span style={{ fontSize: "12px", opacity: 0.75 }}>
+                Allow camera permission when your browser asks.
+              </span>
             </div>
+          )}
+
+          {isReady && (
+            <>
+              <div
+                style={{
+                  position: "absolute",
+                  inset: "10%",
+                  border: "2px solid rgba(255,255,255,0.86)",
+                  borderRadius: "12px",
+                  pointerEvents: "none",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  left: "12px",
+                  right: "12px",
+                  bottom: "16px",
+                  textAlign: "center",
+                  color: "white",
+                  fontSize: "12px",
+                  textShadow: "0 2px 8px rgba(0,0,0,0.9)",
+                  pointerEvents: "none",
+                }}
+              >
+                Keep the complete {selectedSide} label inside the frame
+              </div>
+            </>
+          )}
+
+          {useFallback && (
+            <div
+              style={{
+                color: "white",
+                textAlign: "center",
+                padding: "24px",
+                maxWidth: "620px",
+              }}
+            >
+              <Icon name="camera" size={42} />
+              <strong style={{ display: "block", marginTop: "12px" }}>
+                Live preview unavailable
+              </strong>
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  opacity: 0.8,
+                  fontSize: "12px",
+                  lineHeight: 1.6,
+                }}
+              >
+                {cameraMessage}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {cameraMessage && !useFallback && (
+          <div
+            style={{
+              marginTop: "12px",
+              padding: "10px 12px",
+              borderRadius: "10px",
+              background: "rgba(217,145,0,0.10)",
+              border: "1px solid rgba(217,145,0,0.24)",
+              fontSize: "12px",
+              lineHeight: 1.5,
+            }}
+          >
+            {cameraMessage}
           </div>
         )}
 
@@ -5904,42 +6479,67 @@ function CameraModal(props) {
           style={{
             display: "flex",
             justifyContent: "center",
-            gap: "12px",
-            marginTop: "18px",
+            alignItems: "center",
+            gap: "10px",
+            marginTop: "16px",
             flexWrap: "wrap",
           }}
         >
           <button
+            type="button"
             className="secondary-button"
-            onClick={
-              props.onClose
-            }
+            onClick={closeModal}
           >
-            <Icon
-              name="close"
-              size={18}
-            />
-
+            <Icon name="close" size={18} />
             Cancel
           </button>
 
-          <button
-            className="primary-button large"
-            disabled={
-              !props.cameraReady ||
-              !!props.cameraError
-            }
-            onClick={
-              props.onCapture
-            }
-          >
-            <Icon
-              name="camera"
-              size={20}
-            />
+          {isReady && (
+            <button
+              type="button"
+              className="primary-button large"
+              disabled={captureBusy}
+              onClick={captureLivePhoto}
+            >
+              <Icon name="camera" size={20} />
+              {captureBusy
+                ? "Capturing…"
+                : "Capture " +
+                  (selectedSide === "front" ? "Front" : "Back") +
+                  " Photo"}
+            </button>
+          )}
 
-            Capture {props.selectedSide === "front" ? "Front" : "Back"} Photo
-          </button>
+          {(useFallback || isStarting) && (
+            <label
+              className="primary-button large"
+              style={{ cursor: "pointer" }}
+            >
+              <input
+                ref={nativeCaptureRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleNativeCapture}
+                style={{ display: "none" }}
+              />
+              <Icon name="camera" size={20} />
+              Open Device Camera
+            </label>
+          )}
+        </div>
+
+        <div
+          style={{
+            marginTop: "12px",
+            color: "var(--muted, #718096)",
+            fontSize: "10px",
+            lineHeight: 1.55,
+            textAlign: "center",
+          }}
+        >
+          Laptop live camera: use localhost or HTTPS and allow browser camera
+          permission. Phone over a local HTTP address: use Open Device Camera.
         </div>
       </div>
     </div>
