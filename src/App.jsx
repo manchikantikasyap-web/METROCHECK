@@ -4,6 +4,37 @@ import { jsPDF } from "jspdf";
 import "./App.css";
 
 const HISTORY_KEY = "metrocheck_inspections_v8";
+const INSPECTOR_ACCOUNTS_KEY = "metrocheck_inspector_accounts_v1";
+const CURRENT_INSPECTOR_KEY = "metrocheck_current_inspector_v1";
+const AUTH_SESSION_KEY = "metrocheck_auth_session_v1";
+
+/*
+ * Mock government registry for the SIH prototype. In production this would
+ * be replaced by a secure department/Legal Metrology backend.
+ */
+const GOVERNMENT_INSPECTOR_REGISTRY = [
+  {
+    id: "INS-001",
+    name: "Inspector",
+    email: "inspector@demo.metrology.gov.in",
+    department: "Legal Metrology Department",
+    office: "West Godavari",
+  },
+  {
+    id: "INS-002",
+    name: "Priya Sharma",
+    email: "priya.sharma@demo.metrology.gov.in",
+    department: "Legal Metrology Department",
+    office: "Krishna",
+  },
+  {
+    id: "INS-003",
+    name: "Ravi Kumar",
+    email: "ravi.kumar@demo.metrology.gov.in",
+    department: "Legal Metrology Department",
+    office: "East Godavari",
+  },
+];
 
 const EMPTY_FIELDS = {
   manufacturer: "",
@@ -22,6 +53,11 @@ const EMPTY_FIELDS = {
 const EMPTY_INSPECTOR = {
   name: "",
   id: "",
+};
+
+const DEFAULT_INSPECTOR = {
+  name: "Inspector",
+  id: "INS-001",
 };
 
 const FIELD_CONFIG = [
@@ -178,6 +214,149 @@ function formatTime(date) {
   });
 }
 
+function normalizeInspectorAccount(account) {
+  var source = account && typeof account === "object"
+    ? account
+    : {};
+
+  var id = String(source.id || "").trim();
+  var name = String(source.name || "").trim();
+
+  return {
+    id: id || DEFAULT_INSPECTOR.id,
+    name: name || DEFAULT_INSPECTOR.name,
+    email: String(source.email || "").trim().toLowerCase(),
+    password: String(source.password || ""),
+    verified: Boolean(source.verified),
+    department: String(source.department || "Legal Metrology Department"),
+    office: String(source.office || ""),
+  };
+}
+
+function loadInspectorAccounts() {
+  try {
+    var saved = JSON.parse(
+      localStorage.getItem(INSPECTOR_ACCOUNTS_KEY) || "[]"
+    );
+
+    if (Array.isArray(saved) && saved.length) {
+      return saved.map(normalizeInspectorAccount);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+
+  return [Object.assign({}, DEFAULT_INSPECTOR)];
+}
+
+function saveInspectorAccounts(accounts) {
+  try {
+    localStorage.setItem(
+      INSPECTOR_ACCOUNTS_KEY,
+      JSON.stringify(accounts)
+    );
+    return true;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
+function getCurrentInspectorId(accounts) {
+  try {
+    var savedId = String(
+      localStorage.getItem(CURRENT_INSPECTOR_KEY) || ""
+    ).trim();
+
+    if (savedId && accounts.some(function (account) {
+      return account.id === savedId;
+    })) {
+      return savedId;
+    }
+  } catch (error) {
+    console.error(error);
+  }
+
+  return accounts[0] ? accounts[0].id : DEFAULT_INSPECTOR.id;
+}
+
+function saveCurrentInspectorId(id) {
+  try {
+    localStorage.setItem(
+      CURRENT_INSPECTOR_KEY,
+      String(id || DEFAULT_INSPECTOR.id)
+    );
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function getAuthSessionId() {
+  try {
+    return String(
+      localStorage.getItem(AUTH_SESSION_KEY) || ""
+    ).trim();
+  } catch (error) {
+    console.error(error);
+    return "";
+  }
+}
+
+function saveAuthSessionId(id) {
+  try {
+    if (id) {
+      localStorage.setItem(AUTH_SESSION_KEY, String(id));
+    } else {
+      localStorage.removeItem(AUTH_SESSION_KEY);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function getAllStoredHistory() {
+  try {
+    var saved = JSON.parse(
+      localStorage.getItem(HISTORY_KEY) || "[]"
+    );
+
+    if (Array.isArray(saved)) {
+      return saved.map(function (item) {
+        return normalizeHistoryRecord(item);
+      });
+    }
+  } catch (error) {
+    console.error(error);
+  }
+
+  return [];
+}
+
+function saveAllStoredHistory(records) {
+  try {
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify(records)
+    );
+    return true;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
+function getHistoryOwnerId(record) {
+  if (record && record.ownerId) {
+    return String(record.ownerId);
+  }
+
+  if (record && record.inspector && record.inspector.id) {
+    return String(record.inspector.id);
+  }
+
+  return DEFAULT_INSPECTOR.id;
+}
+
 function getRecordTimestamp(record) {
   var raw = Number(record && record.timestamp);
 
@@ -214,6 +393,7 @@ function normalizeHistoryRecord(record) {
     source,
     {
       id: source.id || makeInspectionId(),
+      ownerId: getHistoryOwnerId(source),
       productName:
         source.productName ||
         (source.fields && source.fields.productName) ||
@@ -914,6 +1094,15 @@ function App() {
   var [darkMode, setDarkMode] =
     useState(false);
 
+  /*
+   * PHASE 4: Settings and inspector profile panel.
+   */
+  var [settingsOpen, setSettingsOpen] =
+    useState(false);
+
+  var [settingsView, setSettingsView] =
+    useState("settings");
+
   var [inspectionId, setInspectionId] =
     useState(makeInspectionId());
 
@@ -953,9 +1142,38 @@ function App() {
   var [notes, setNotes] =
     useState("");
 
+  var initialAccounts = useMemo(function () {
+    return loadInspectorAccounts();
+  }, []);
+
+  var initialInspectorId = getCurrentInspectorId(initialAccounts);
+  var initialInspector =
+    initialAccounts.find(function (account) {
+      return account.id === initialInspectorId;
+    }) || initialAccounts[0] || DEFAULT_INSPECTOR;
+
+  var [inspectorAccounts, setInspectorAccounts] =
+    useState(initialAccounts);
+
+  var [currentInspectorId, setCurrentInspectorId] =
+    useState(initialInspector.id);
+
   var [inspector, setInspector] =
     useState(
-      Object.assign({}, EMPTY_INSPECTOR)
+      Object.assign({}, initialInspector)
+    );
+
+  var initialAuthId = getAuthSessionId();
+  var initialAuthenticatedAccount =
+    initialAccounts.find(function (account) {
+      return account.id === initialAuthId && account.verified;
+    });
+
+  var [authenticatedInspectorId, setAuthenticatedInspectorId] =
+    useState(
+      initialAuthenticatedAccount
+        ? initialAuthenticatedAccount.id
+        : ""
     );
 
   var [scanState, setScanState] =
@@ -995,30 +1213,33 @@ function App() {
   var streamRef = useRef(null);
 
   useEffect(function () {
-    try {
-      var saved = JSON.parse(
-        localStorage.getItem(HISTORY_KEY) ||
-          "[]"
+    var allHistory = getAllStoredHistory();
+    var migrated = allHistory.map(function (record) {
+      var ownerId = getHistoryOwnerId(record);
+      var normalized = normalizeHistoryRecord(
+        Object.assign({}, record, { ownerId: ownerId })
       );
 
-      if (Array.isArray(saved)) {
-        var normalizedHistory = saved
-          .map(function (item) {
-            return normalizeHistoryRecord(item);
-          })
-          .sort(function (a, b) {
-            return getRecordTimestamp(b) - getRecordTimestamp(a);
-          });
+      return normalized;
+    });
 
-        setHistory(normalizedHistory);
-      } else {
-        setHistory([]);
-      }
-    } catch (error) {
-      console.error(error);
-      setHistory([]);
-    }
-  }, []);
+    saveAllStoredHistory(migrated);
+
+    var visibleHistory = migrated
+      .filter(function (record) {
+        return getHistoryOwnerId(record) === currentInspectorId;
+      })
+      .sort(function (a, b) {
+        return getRecordTimestamp(b) - getRecordTimestamp(a);
+      });
+
+    setHistory(visibleHistory);
+  }, [currentInspectorId]);
+
+  useEffect(function () {
+    saveInspectorAccounts(inspectorAccounts);
+    saveCurrentInspectorId(currentInspectorId);
+  }, [inspectorAccounts, currentInspectorId]);
 
   useEffect(
     function () {
@@ -1044,6 +1265,33 @@ function App() {
       };
     },
     [toast]
+  );
+
+  useEffect(
+    function () {
+      if (!settingsOpen) {
+        return undefined;
+      }
+
+      function handleSettingsKeyDown(event) {
+        if (event.key === "Escape") {
+          setSettingsOpen(false);
+        }
+      }
+
+      window.addEventListener(
+        "keydown",
+        handleSettingsKeyDown
+      );
+
+      return function () {
+        window.removeEventListener(
+          "keydown",
+          handleSettingsKeyDown
+        );
+      };
+    },
+    [settingsOpen]
   );
 
   useEffect(function () {
@@ -1203,6 +1451,15 @@ function App() {
     setToast(message);
   }
 
+  function openSettings(view) {
+    setSettingsView(view || "settings");
+    setSettingsOpen(true);
+  }
+
+  function closeSettings() {
+    setSettingsOpen(false);
+  }
+
   function resetInspection() {
     stopCamera();
 
@@ -1237,13 +1494,6 @@ function App() {
     setEvidence([]);
     setDecision("");
     setNotes("");
-
-    setInspector(
-      Object.assign(
-        {},
-        EMPTY_INSPECTOR
-      )
-    );
 
     setScanState("idle");
     setScanProgress(0);
@@ -1592,15 +1842,175 @@ function App() {
   }
 
   function updateInspector(key, value) {
+    var nextValue = String(value || "");
+
     setInspector(function (previous) {
       return Object.assign(
         {},
         previous,
         {
-          [key]: value,
+          [key]: nextValue,
         }
       );
     });
+
+    if (key === "name") {
+      setInspectorAccounts(function (previous) {
+        return previous.map(function (account) {
+          return account.id === currentInspectorId
+            ? Object.assign({}, account, { name: nextValue })
+            : account;
+        });
+      });
+    }
+  }
+
+  function registerInspector(registration) {
+    var cleanId = String(
+      registration && registration.id || ""
+    ).trim().toUpperCase();
+    var cleanEmail = String(
+      registration && registration.email || ""
+    ).trim().toLowerCase();
+    var password = String(
+      registration && registration.password || ""
+    );
+
+    var registryRecord = GOVERNMENT_INSPECTOR_REGISTRY.find(
+      function (record) {
+        return (
+          record.id.toUpperCase() === cleanId &&
+          record.email.toLowerCase() === cleanEmail
+        );
+      }
+    );
+
+    if (!cleanId || !cleanEmail || !password) {
+      showToast(
+        "Enter the government inspector ID, official email and password."
+      );
+      return false;
+    }
+
+    if (password.length < 6) {
+      showToast("Password must contain at least 6 characters.");
+      return false;
+    }
+
+    if (!registryRecord) {
+      showToast(
+        "Inspector could not be verified against the government registry."
+      );
+      return false;
+    }
+
+    var existing = inspectorAccounts.find(
+      function (account) {
+        return account.id === registryRecord.id;
+      }
+    );
+
+    if (existing && existing.verified) {
+      showToast(
+        "This inspector is already registered. Please sign in."
+      );
+      return false;
+    }
+
+    var account = Object.assign(
+      {},
+      registryRecord,
+      {
+        password: password,
+        verified: true,
+        verifiedAt: Date.now(),
+      }
+    );
+
+    var updatedAccounts = inspectorAccounts.filter(
+      function (item) {
+        return item.id !== account.id;
+      }
+    ).concat([account]);
+
+    saveInspectorAccounts(updatedAccounts);
+    saveCurrentInspectorId(account.id);
+    saveAuthSessionId(account.id);
+
+    setInspectorAccounts(updatedAccounts);
+    setCurrentInspectorId(account.id);
+    setInspector(Object.assign({}, account));
+    setAuthenticatedInspectorId(account.id);
+    setSettingsOpen(false);
+    resetInspection();
+    showToast(
+      "Inspector verified. Welcome to MetroCheck."
+    );
+
+    return true;
+  }
+
+  function demoLogin() {
+    var demoAccount = inspectorAccounts.find(function (account) {
+      return account.id === "INS-001";
+    }) || {
+      id: "INS-001",
+      name: "Inspector",
+      email: "inspector@demo.metrology.gov.in",
+      department: "Legal Metrology Department",
+      office: "West Godavari",
+      verified: true,
+    };
+
+    saveCurrentInspectorId(demoAccount.id);
+    saveAuthSessionId(demoAccount.id);
+    setCurrentInspectorId(demoAccount.id);
+    setInspector(Object.assign({}, demoAccount));
+    setAuthenticatedInspectorId(demoAccount.id);
+    setSettingsOpen(false);
+    resetInspection();
+    showToast("Demo Inspector signed in.");
+  }
+
+  function loginInspector(email, password) {
+    var cleanEmail = String(email || "").trim().toLowerCase();
+    var cleanPassword = String(password || "");
+
+    var account = inspectorAccounts.find(
+      function (item) {
+        return (
+          item.email &&
+          item.email.toLowerCase() === cleanEmail &&
+          item.password === cleanPassword &&
+          item.verified
+        );
+      }
+    );
+
+    if (!account) {
+      showToast(
+        "Invalid MetroCheck account details. Please verify your email and password."
+      );
+      return false;
+    }
+
+    saveCurrentInspectorId(account.id);
+    saveAuthSessionId(account.id);
+    setCurrentInspectorId(account.id);
+    setInspector(Object.assign({}, account));
+    setAuthenticatedInspectorId(account.id);
+    resetInspection();
+    showToast("Welcome back, " + account.name + ".");
+    return true;
+  }
+
+  function logoutInspector() {
+    stopCamera();
+    saveAuthSessionId("");
+    setAuthenticatedInspectorId("");
+    setSettingsOpen(false);
+    setPage("dashboard");
+    showToast("Signed out of MetroCheck.");
   }
 
   function handleEvidence(files) {
@@ -1691,6 +2101,8 @@ function App() {
     var record = {
       id: inspectionId,
 
+      ownerId: currentInspectorId,
+
       productName:
         fields.productName ||
         "Unknown commodity",
@@ -1759,33 +2171,28 @@ function App() {
     var normalizedRecord =
       normalizeHistoryRecord(record);
 
-    var next = [
+    var allHistory = getAllStoredHistory();
+    var nextAll = [
       normalizedRecord,
-      ...history.filter(
-        function (item) {
-          return item.id !== inspectionId;
-        }
-      ),
+      ...allHistory.filter(function (item) {
+        return item.id !== inspectionId;
+      }),
     ].sort(function (a, b) {
       return getRecordTimestamp(b) - getRecordTimestamp(a);
     });
 
-    setHistory(next);
-
-    try {
-      localStorage.setItem(
-        HISTORY_KEY,
-        JSON.stringify(next)
-      );
-    } catch (error) {
-      console.error(error);
-
+    if (!saveAllStoredHistory(nextAll)) {
       showToast(
         "Inspection was processed, but browser storage is full."
       );
-
       return;
     }
+
+    var nextVisible = nextAll.filter(function (item) {
+      return getHistoryOwnerId(item) === currentInspectorId;
+    });
+
+    setHistory(nextVisible);
 
     setDecision(finalStatus);
 
@@ -1886,23 +2293,20 @@ function App() {
   }
 
   function deleteInspection(id) {
-    var next =
-      history.filter(
-        function (item) {
-          return item.id !== id;
-        }
-      );
+    var allHistory = getAllStoredHistory();
+    var nextAll = allHistory.filter(function (item) {
+      return item.id !== id;
+    });
 
-    setHistory(next);
-
-    try {
-      localStorage.setItem(
-        HISTORY_KEY,
-        JSON.stringify(next)
-      );
-    } catch (error) {
-      console.error(error);
+    if (!saveAllStoredHistory(nextAll)) {
+      return;
     }
+
+    setHistory(
+      nextAll.filter(function (item) {
+        return getHistoryOwnerId(item) === currentInspectorId;
+      })
+    );
 
     showToast(
       "Inspection removed."
@@ -1923,14 +2327,19 @@ function App() {
       return;
     }
 
+    var allHistory = getAllStoredHistory();
+    var remaining = allHistory.filter(function (item) {
+      return getHistoryOwnerId(item) !== currentInspectorId;
+    });
+
+    if (!saveAllStoredHistory(remaining)) {
+      return;
+    }
+
     setHistory([]);
 
-    localStorage.removeItem(
-      HISTORY_KEY
-    );
-
     showToast(
-      "Inspection history cleared."
+      "Your inspection history was cleared."
     );
   }
 
@@ -2451,6 +2860,23 @@ function App() {
     );
   }
 
+  if (!authenticatedInspectorId) {
+    return (
+      <InspectorAuthPage
+        darkMode={darkMode}
+        onToggleDarkMode={function () {
+          setDarkMode(function (previous) {
+            return !previous;
+          });
+        }}
+        onRegister={registerInspector}
+        onLogin={loginInspector}
+        onDemoLogin={demoLogin}
+        toast={toast}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -2617,11 +3043,11 @@ function App() {
 
             <div>
               <strong>
-                Inspector
+                {inspector.name || "Inspector"}
               </strong>
 
               <span>
-                Field Operator
+                {inspector.id || "Not verified"}
               </span>
             </div>
           </div>
@@ -2662,8 +3088,13 @@ function App() {
             </div>
 
             <button
+              type="button"
               className="icon-button"
               title="Settings"
+              aria-label="Open MetroCheck settings"
+              onClick={function () {
+                openSettings("settings");
+              }}
             >
               <Icon
                 name="settings"
@@ -2671,9 +3102,23 @@ function App() {
               />
             </button>
 
-            <div className="top-avatar">
+            <button
+              type="button"
+              className="top-avatar"
+              title="Inspector profile"
+              aria-label="Open inspector profile"
+              onClick={function () {
+                openSettings("profile");
+              }}
+              style={{
+                border: "none",
+                cursor: "pointer",
+                font: "inherit",
+                padding: 0,
+              }}
+            >
               I
-            </div>
+            </button>
           </div>
         </header>
 
@@ -2873,6 +3318,24 @@ function App() {
           <AboutPage />
         )}
       </main>
+
+      {settingsOpen && (
+        <SettingsModal
+          view={settingsView}
+          darkMode={darkMode}
+          inspector={inspector}
+          environmentReadiness={
+            environmentReadiness
+          }
+          onClose={closeSettings}
+          onToggleDarkMode={function () {
+            setDarkMode(function (previous) {
+              return !previous;
+            });
+          }}
+          onLogout={logoutInspector}
+        />
+      )}
 
       {toast && (
         <div className="toast">
@@ -5603,23 +6066,714 @@ function AboutPage() {
   );
 }
 
-function AboutCard(props) {
+function InspectorAuthPage(props) {
+  var darkMode = props.darkMode;
+  var surface = darkMode ? "#111827" : "#ffffff";
+  var text = darkMode ? "#f8fafc" : "#172033";
+  var muted = darkMode ? "#aab4c4" : "#697586";
+  var border = darkMode ? "#2d3748" : "#e2e8f0";
+  var softBackground = darkMode ? "#172033" : "#f4f7fb";
+  var inputBackground = darkMode ? "#182233" : "#f8fafc";
+
+  var [mode, setMode] = useState("login");
+  var [inspectorId, setInspectorId] = useState("");
+  var [email, setEmail] = useState("");
+  var [password, setPassword] = useState("");
+  var [confirmPassword, setConfirmPassword] = useState("");
+
+  function submitLogin(event) {
+    event.preventDefault();
+    props.onLogin(email, password);
+  }
+
+  function submitRegistration(event) {
+    event.preventDefault();
+
+    if (password !== confirmPassword) {
+      return;
+    }
+
+    props.onRegister({
+      id: inspectorId,
+      email: email,
+      password: password,
+    });
+  }
+
+  var fieldStyle = {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "13px 14px",
+    borderRadius: "12px",
+    border: "1px solid " + border,
+    background: inputBackground,
+    color: text,
+    outline: "none",
+    fontSize: "14px",
+  };
+
+  var primaryButtonStyle = {
+    width: "100%",
+    padding: "13px 16px",
+    borderRadius: "12px",
+    border: "none",
+    background: "#2563eb",
+    color: "#ffffff",
+    cursor: "pointer",
+    fontWeight: 800,
+    fontSize: "14px",
+  };
+
   return (
-    <div className="panel about-card">
-      <div className="about-card-icon">
-        <Icon
-          name={props.icon}
-          size={22}
-        />
+    <div
+      style={{
+        minHeight: "100vh",
+        background: darkMode ? "#0b1220" : "#f4f7fb",
+        color: text,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px",
+        boxSizing: "border-box",
+      }}
+    >
+      <div
+        style={{
+          width: "min(980px, 100%)",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: "18px",
+        }}
+      >
+        <section
+          style={{
+            background: surface,
+            border: "1px solid " + border,
+            borderRadius: "22px",
+            padding: "28px",
+            boxShadow: "0 20px 60px rgba(0, 0, 0, 0.10)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "14px",
+              marginBottom: "24px",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 900,
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: muted,
+                }}
+              >
+                MetroCheck
+              </div>
+              <h1
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: "30px",
+                  lineHeight: 1.1,
+                }}
+              >
+                Inspector Portal
+              </h1>
+            </div>
+
+            <button
+              type="button"
+              onClick={props.onToggleDarkMode}
+              title="Toggle theme"
+              style={{
+                border: "1px solid " + border,
+                borderRadius: "11px",
+                background: softBackground,
+                color: text,
+                cursor: "pointer",
+                padding: "10px 12px",
+                fontWeight: 800,
+              }}
+            >
+              {darkMode ? "☀" : "☾"}
+            </button>
+          </div>
+
+          <div
+            style={{
+              padding: "14px 15px",
+              borderRadius: "14px",
+              background: softBackground,
+              border: "1px solid " + border,
+              marginBottom: "20px",
+            }}
+          >
+            <strong style={{ display: "block", fontSize: "14px" }}>
+              Government-registered access
+            </strong>
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: muted,
+                fontSize: "12px",
+                lineHeight: 1.55,
+              }}
+            >
+              MetroCheck does not let inspectors create arbitrary identities.
+              First-time registration verifies the inspector against the
+              department registry before the account is activated.
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "8px",
+              marginBottom: "20px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={function () { setMode("login"); }}
+              style={{
+                padding: "11px",
+                borderRadius: "11px",
+                border: "1px solid " + border,
+                background: mode === "login" ? "#2563eb" : softBackground,
+                color: mode === "login" ? "#ffffff" : text,
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              onClick={function () { setMode("register"); }}
+              style={{
+                padding: "11px",
+                borderRadius: "11px",
+                border: "1px solid " + border,
+                background: mode === "register" ? "#2563eb" : softBackground,
+                color: mode === "register" ? "#ffffff" : text,
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              First-time sign up
+            </button>
+          </div>
+
+          {mode === "login" ? (
+            <form onSubmit={submitLogin}>
+              <label style={{ display: "block", marginBottom: "14px", fontSize: "13px", fontWeight: 800 }}>
+                Official email
+                <input
+                  type="email"
+                  value={email}
+                  onChange={function (event) { setEmail(event.target.value); }}
+                  placeholder="official@department.gov.in"
+                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
+                  required
+                />
+              </label>
+
+              <label style={{ display: "block", marginBottom: "16px", fontSize: "13px", fontWeight: 800 }}>
+                Password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={function (event) { setPassword(event.target.value); }}
+                  placeholder="Enter your MetroCheck password"
+                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
+                  required
+                />
+              </label>
+
+              <button type="submit" style={primaryButtonStyle}>
+                Sign in to MetroCheck
+              </button>
+
+              <button
+                type="button"
+                onClick={props.onDemoLogin}
+                style={{
+                  width: "100%",
+                  padding: "12px 16px",
+                  marginTop: "10px",
+                  borderRadius: "12px",
+                  border: "1px solid " + border,
+                  background: softBackground,
+                  color: text,
+                  cursor: "pointer",
+                  fontWeight: 800,
+                  fontSize: "14px",
+                }}
+              >
+                Enter Demo Inspector
+              </button>
+
+              <p
+                style={{
+                  margin: "10px 0 0",
+                  color: muted,
+                  fontSize: "11px",
+                  lineHeight: 1.45,
+                  textAlign: "center",
+                }}
+              >
+                SIH demo access — no real government credentials required.
+              </p>
+            </form>
+          ) : (
+            <form onSubmit={submitRegistration}>
+              <label style={{ display: "block", marginBottom: "14px", fontSize: "13px", fontWeight: 800 }}>
+                Government Inspector ID
+                <input
+                  type="text"
+                  value={inspectorId}
+                  onChange={function (event) { setInspectorId(event.target.value); }}
+                  placeholder="e.g. INS-001"
+                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
+                  required
+                />
+              </label>
+
+              <label style={{ display: "block", marginBottom: "14px", fontSize: "13px", fontWeight: 800 }}>
+                Registered official email
+                <input
+                  type="email"
+                  value={email}
+                  onChange={function (event) { setEmail(event.target.value); }}
+                  placeholder="Use the email registered with the department"
+                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
+                  required
+                />
+              </label>
+
+              <label style={{ display: "block", marginBottom: "14px", fontSize: "13px", fontWeight: 800 }}>
+                Create password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={function (event) { setPassword(event.target.value); }}
+                  placeholder="At least 6 characters"
+                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
+                  required
+                />
+              </label>
+
+              <label style={{ display: "block", marginBottom: "16px", fontSize: "13px", fontWeight: 800 }}>
+                Confirm password
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={function (event) { setConfirmPassword(event.target.value); }}
+                  placeholder="Re-enter password"
+                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
+                  required
+                />
+              </label>
+
+              {confirmPassword && password !== confirmPassword && (
+                <div style={{ color: "#dc2626", fontSize: "12px", marginBottom: "12px" }}>
+                  Passwords do not match.
+                </div>
+              )}
+
+              <button type="submit" style={primaryButtonStyle}>
+                Verify & create account
+              </button>
+            </form>
+          )}
+        </section>
+
+        <section
+          style={{
+            background: surface,
+            border: "1px solid " + border,
+            borderRadius: "22px",
+            padding: "28px",
+            boxShadow: "0 20px 60px rgba(0, 0, 0, 0.06)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "11px",
+              fontWeight: 900,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: muted,
+              marginBottom: "10px",
+            }}
+          >
+            How access works
+          </div>
+
+          <h2 style={{ margin: "0 0 18px", fontSize: "22px" }}>
+            Registered first. Account second.
+          </h2>
+
+          <div style={{ display: "grid", gap: "12px" }}>
+            {[
+              ["01", "Department registration", "The inspector already exists in the government registry."],
+              ["02", "Identity verification", "MetroCheck matches the submitted Inspector ID and registered official email."],
+              ["03", "Account activation", "The verified inspector creates a MetroCheck login for future sign-ins."],
+              ["04", "Private workspace", "Inspection history, reports and profile information are tied to that inspector ID."],
+            ].map(function (item) {
+              return (
+                <div
+                  key={item[0]}
+                  style={{
+                    display: "flex",
+                    gap: "12px",
+                    padding: "13px",
+                    borderRadius: "13px",
+                    background: softBackground,
+                    border: "1px solid " + border,
+                  }}
+                >
+                  <div style={{ fontWeight: 900, color: "#2563eb" }}>
+                    {item[0]}
+                  </div>
+                  <div>
+                    <strong style={{ display: "block", fontSize: "13px" }}>
+                      {item[1]}
+                    </strong>
+                    <span style={{ display: "block", marginTop: "3px", color: muted, fontSize: "12px", lineHeight: 1.5 }}>
+                      {item[2]}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              marginTop: "18px",
+              padding: "14px",
+              borderRadius: "14px",
+              border: "1px dashed " + border,
+              color: muted,
+              fontSize: "11px",
+              lineHeight: 1.55,
+            }}
+          >
+            SIH prototype note: the government registry is mocked locally for
+            demonstration. A production deployment would verify identities
+            against the department's authenticated backend and database.
+          </div>
+
+          <div
+            style={{
+              marginTop: "14px",
+              padding: "14px",
+              borderRadius: "14px",
+              background: darkMode ? "#172033" : "#eff6ff",
+              border: "1px solid " + border,
+              fontSize: "12px",
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>Demo registry IDs:</strong>
+            <div style={{ marginTop: "6px", color: muted }}>
+              INS-001 · inspector@demo.metrology.gov.in<br />
+              INS-002 · priya.sharma@demo.metrology.gov.in<br />
+              INS-003 · ravi.kumar@demo.metrology.gov.in
+            </div>
+          </div>
+        </section>
       </div>
 
-      <h3>
-        {props.title}
-      </h3>
+      {props.toast && (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            bottom: "22px",
+            transform: "translateX(-50%)",
+            padding: "11px 15px",
+            borderRadius: "12px",
+            background: darkMode ? "#1f2937" : "#172033",
+            color: "#ffffff",
+            boxShadow: "0 12px 35px rgba(0,0,0,0.2)",
+            fontSize: "13px",
+            fontWeight: 700,
+            zIndex: 3000,
+            maxWidth: "calc(100% - 32px)",
+          }}
+        >
+          {props.toast}
+        </div>
+      )}
+    </div>
+  );
+}
 
-      <p>
-        {props.text}
-      </p>
+function SettingsModal(props) {
+  var darkMode = props.darkMode;
+  var inspector = props.inspector || {};
+  var environmentReadiness =
+    props.environmentReadiness || {
+      secure: false,
+      storage: false,
+    };
+
+  var surface = darkMode ? "#111827" : "#ffffff";
+  var text = darkMode ? "#f8fafc" : "#172033";
+  var muted = darkMode ? "#aab4c4" : "#697586";
+  var border = darkMode ? "#2d3748" : "#e2e8f0";
+  var softBackground = darkMode ? "#172033" : "#f4f7fb";
+
+  function handleOverlayClick(event) {
+    if (event.target === event.currentTarget) {
+      props.onClose();
+    }
+  }
+
+  return (
+    <div
+      role="presentation"
+      onMouseDown={handleOverlayClick}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 2000,
+        background: "rgba(5, 15, 30, 0.58)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="metrocheck-settings-title"
+        onMouseDown={function (event) { event.stopPropagation(); }}
+        style={{
+          width: "min(620px, 100%)",
+          maxHeight: "calc(100vh - 32px)",
+          overflowY: "auto",
+          background: surface,
+          color: text,
+          border: "1px solid " + border,
+          borderRadius: "22px",
+          boxShadow: "0 24px 70px rgba(0, 0, 0, 0.28)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "16px",
+            padding: "20px 22px",
+            borderBottom: "1px solid " + border,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: "11px", fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: muted, marginBottom: "6px" }}>
+              MetroCheck
+            </div>
+            <h2 id="metrocheck-settings-title" style={{ margin: 0, fontSize: "22px", lineHeight: 1.2 }}>
+              {props.view === "profile" ? "Inspector Profile" : "Settings"}
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            aria-label="Close"
+            title="Close"
+            onClick={props.onClose}
+            style={{
+              width: "38px",
+              height: "38px",
+              borderRadius: "12px",
+              border: "1px solid " + border,
+              background: softBackground,
+              color: text,
+              cursor: "pointer",
+              fontSize: "22px",
+              lineHeight: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ padding: "20px 22px 22px" }}>
+          {props.view === "profile" ? (
+            <>
+              <div
+                style={{
+                  padding: "18px",
+                  borderRadius: "16px",
+                  background: softBackground,
+                  border: "1px solid " + border,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "16px" }}>
+                  <div
+                    style={{
+                      width: "52px",
+                      height: "52px",
+                      borderRadius: "16px",
+                      background: "#2563eb",
+                      color: "#ffffff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "20px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {(inspector.name || "I").charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <strong style={{ display: "block", fontSize: "17px" }}>
+                      {inspector.name || "Inspector"}
+                    </strong>
+                    <span style={{ display: "block", marginTop: "3px", color: muted, fontSize: "12px" }}>
+                      Verified government inspector
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gap: "10px" }}>
+                  <ProfileRow label="Inspector ID" value={inspector.id || "Not assigned"} />
+                  <ProfileRow label="Official email" value={inspector.email || "Not registered"} />
+                  <ProfileRow label="Department" value={inspector.department || "Legal Metrology Department"} />
+                  <ProfileRow label="Office / jurisdiction" value={inspector.office || "Not specified"} />
+                </div>
+              </div>
+
+              <p style={{ margin: "12px 0 0", color: muted, fontSize: "12px", lineHeight: 1.55 }}>
+                These identity details come from the verified government registry record. They are not editable from the MetroCheck workspace.
+              </p>
+
+              <button
+                type="button"
+                onClick={props.onLogout}
+                style={{
+                  width: "100%",
+                  marginTop: "18px",
+                  padding: "12px 16px",
+                  borderRadius: "12px",
+                  border: "1px solid " + border,
+                  background: softBackground,
+                  color: text,
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <div
+                style={{
+                  padding: "16px",
+                  borderRadius: "16px",
+                  background: softBackground,
+                  border: "1px solid " + border,
+                  marginBottom: "16px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px" }}>
+                  <div>
+                    <div style={{ fontSize: "15px", fontWeight: 800 }}>Appearance</div>
+                    <div style={{ marginTop: "4px", color: muted, fontSize: "12px" }}>
+                      Switch the MetroCheck workspace theme.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={props.onToggleDarkMode}
+                    style={{ border: "1px solid " + border, borderRadius: "11px", background: softBackground, color: text, cursor: "pointer", padding: "10px 13px", fontWeight: 800, fontSize: "12px" }}
+                  >
+                    {darkMode ? "☀ Light mode" : "☾ Dark mode"}
+                  </button>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: "16px",
+                  borderRadius: "16px",
+                  background: softBackground,
+                  border: "1px solid " + border,
+                }}
+              >
+                <div style={{ fontSize: "12px", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: muted, marginBottom: "12px" }}>
+                  System status
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+                  <StatusBox label="Browser security" value={environmentReadiness.secure ? "Ready" : "Local browser mode"} />
+                  <StatusBox label="Local storage" value={environmentReadiness.storage ? "Available" : "Unavailable"} />
+                  <StatusBox label="Account model" value="Government registry verification" />
+                  <StatusBox label="History isolation" value="Inspector ID scoped" />
+                </div>
+              </div>
+
+              <div style={{ marginTop: "16px", padding: "14px", borderRadius: "14px", border: "1px dashed " + border, color: muted, fontSize: "11px", lineHeight: 1.55 }}>
+                Settings control the application environment only. Inspector identity and inspection history are managed through the verified Inspector Profile and account session.
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProfileRow(props) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: "14px",
+        padding: "11px 12px",
+        borderRadius: "11px",
+        background: "rgba(100,120,150,0.05)",
+      }}
+    >
+      <span style={{ color: "inherit", fontSize: "12px", fontWeight: 700 }}>
+        {props.label}
+      </span>
+      <span style={{ color: "inherit", fontSize: "12px", textAlign: "right" }}>
+        {props.value}
+      </span>
+    </div>
+  );
+}
+
+function StatusBox(props) {
+  return (
+    <div
+      style={{
+        padding: "12px",
+        borderRadius: "12px",
+        background: "rgba(100,120,150,0.05)",
+        border: "1px solid rgba(100,120,150,0.12)",
+      }}
+    >
+      <div style={{ fontSize: "11px", opacity: 0.65 }}>{props.label}</div>
+      <strong style={{ display: "block", marginTop: "5px", fontSize: "13px" }}>
+        {props.value}
+      </strong>
     </div>
   );
 }
