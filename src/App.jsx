@@ -1120,6 +1120,21 @@ function App() {
   var [imagePreview, setImagePreview] =
     useState("");
 
+  /*
+   * PHASE 4:
+   * A packaged commodity may have relevant declarations
+   * across different panels. Keep front and back images
+   * together as one inspection.
+   */
+  var [packageImages, setPackageImages] =
+    useState({
+      front: null,
+      back: null,
+    });
+
+  var [selectedImageSide, setSelectedImageSide] =
+    useState("front");
+
   var [ocrText, setOcrText] =
     useState("");
 
@@ -1482,6 +1497,11 @@ function App() {
 
     setImageFile(null);
     setImagePreview("");
+    setPackageImages({
+      front: null,
+      back: null,
+    });
+    setSelectedImageSide("front");
     setOcrText("");
 
     setFields(
@@ -1510,7 +1530,7 @@ function App() {
     navigate("scanner");
   }
 
-  function handleImage(file) {
+  function handleImage(file, side) {
     if (!file) {
       return;
     }
@@ -1522,20 +1542,50 @@ function App() {
       return;
     }
 
+    var targetSide =
+      side === "back"
+        ? "back"
+        : side === "front"
+        ? "front"
+        : selectedImageSide;
+
+    var previousImage =
+      packageImages[targetSide];
+
     if (
-      imagePreview &&
-      imagePreview.startsWith("blob:")
+      previousImage &&
+      previousImage.preview &&
+      previousImage.preview.startsWith("blob:")
     ) {
       URL.revokeObjectURL(
-        imagePreview
+        previousImage.preview
       );
     }
 
     var previewUrl =
       URL.createObjectURL(file);
 
+    var nextImages = Object.assign(
+      {},
+      packageImages,
+      {
+        [targetSide]: {
+          file: file,
+          preview: previewUrl,
+        },
+      }
+    );
+
+    setPackageImages(nextImages);
+
+    /*
+     * Keep the legacy single-image state pointed at the
+     * newest selected panel so existing workflow logic,
+     * intelligence and compatibility continue to work.
+     */
     setImageFile(file);
     setImagePreview(previewUrl);
+    setSelectedImageSide(targetSide);
 
     setScanState("ready");
     setScanProgress(0);
@@ -1548,7 +1598,10 @@ function App() {
     );
 
     showToast(
-      "Product image loaded."
+      (targetSide === "front"
+        ? "Front"
+        : "Back") +
+        " package image loaded."
     );
   }
 
@@ -1697,7 +1750,9 @@ function App() {
 
         var file = new File(
           [blob],
-          "MetroCheck-Capture-" +
+          "MetroCheck-" +
+            selectedImageSide +
+            "-Capture-" +
             Date.now() +
             ".jpg",
           {
@@ -1705,18 +1760,34 @@ function App() {
           }
         );
 
+        var previousImage =
+          packageImages[selectedImageSide];
+
         if (
-          imagePreview &&
-          imagePreview.startsWith("blob:")
+          previousImage &&
+          previousImage.preview &&
+          previousImage.preview.startsWith("blob:")
         ) {
           URL.revokeObjectURL(
-            imagePreview
+            previousImage.preview
           );
         }
 
         var previewUrl =
           URL.createObjectURL(file);
 
+        var nextImages = Object.assign(
+          {},
+          packageImages,
+          {
+            [selectedImageSide]: {
+              file: file,
+              preview: previewUrl,
+            },
+          }
+        );
+
+        setPackageImages(nextImages);
         setImageFile(file);
         setImagePreview(previewUrl);
 
@@ -1736,7 +1807,10 @@ function App() {
         closeCamera();
 
         showToast(
-          "Photo captured successfully."
+          (selectedImageSide === "front"
+            ? "Front"
+            : "Back") +
+            " photo captured successfully."
         );
       },
       "image/jpeg",
@@ -1745,9 +1819,42 @@ function App() {
   }
 
   async function runOCR() {
-    if (!imagePreview) {
+    var imagesToScan = [
+      {
+        side: "front",
+        item: packageImages.front,
+      },
+      {
+        side: "back",
+        item: packageImages.back,
+      },
+    ].filter(function (entry) {
+      return (
+        entry.item &&
+        entry.item.preview
+      );
+    });
+
+    /*
+     * Compatibility with older single-image state.
+     */
+    if (
+      imagesToScan.length === 0 &&
+      imagePreview
+    ) {
+      imagesToScan = [
+        {
+          side: selectedImageSide,
+          item: {
+            preview: imagePreview,
+          },
+        },
+      ];
+    }
+
+    if (imagesToScan.length === 0) {
       showToast(
-        "Capture or upload a product image first."
+        "Capture or upload the front and/or back package image first."
       );
       return;
     }
@@ -1762,43 +1869,115 @@ function App() {
       worker =
         await createWorker("eng");
 
-      setScanProgress(25);
+      var collectedText = [];
+      var confidenceValues = [];
 
-      var response =
-        await worker.recognize(
-          imagePreview
+      for (
+        var index = 0;
+        index < imagesToScan.length;
+        index += 1
+      ) {
+        var entry =
+          imagesToScan[index];
+
+        setScanProgress(
+          Math.min(
+            90,
+            10 +
+              Math.round(
+                (index /
+                  imagesToScan.length) *
+                  70
+              )
+          )
         );
 
-      setScanProgress(80);
+        var response =
+          await worker.recognize(
+            entry.item.preview
+          );
 
-      var text = normalizeText(
-        response &&
-          response.data
-          ? response.data.text
-          : ""
+        var sideText = normalizeText(
+          response &&
+            response.data
+            ? response.data.text
+            : ""
+        );
+
+        if (sideText) {
+          collectedText.push(
+            "===== " +
+              entry.side.toUpperCase() +
+              " SIDE =====\n" +
+              sideText
+          );
+        }
+
+        var sideConfidence =
+          getOCRConfidence(response);
+
+        if (
+          sideConfidence !== null &&
+          sideConfidence !== undefined
+        ) {
+          confidenceValues.push(
+            Number(sideConfidence)
+          );
+        }
+      }
+
+      setScanProgress(92);
+
+      var combinedText =
+        collectedText.join("\n\n");
+
+      var averageConfidence =
+        confidenceValues.length
+          ? Math.round(
+              confidenceValues.reduce(
+                function (sum, value) {
+                  return sum + value;
+                },
+                0
+              ) /
+                confidenceValues.length
+            )
+          : null;
+
+      setOCRConfidence(
+        averageConfidence
       );
+      setOcrText(combinedText);
 
-      var confidence = getOCRConfidence(response);
-      setOCRConfidence(confidence);
-      setOcrText(text);
-
-      var extracted = extractFields(text);
+      var extracted =
+        extractFields(combinedText);
       var extractedSources = {};
 
-      Object.keys(extracted).forEach(function (key) {
-        if (String(extracted[key] || "").trim()) {
-          extractedSources[key] = "OCR";
+      Object.keys(extracted).forEach(
+        function (key) {
+          if (
+            String(
+              extracted[key] || ""
+            ).trim()
+          ) {
+            extractedSources[key] =
+              "OCR";
+          }
         }
-      });
+      );
 
-      setFieldSources(extractedSources);
+      setFieldSources(
+        extractedSources
+      );
       setFields(extracted);
 
       setScanProgress(100);
       setScanState("complete");
 
       showToast(
-        "OCR scan completed successfully."
+        imagesToScan.length === 2
+          ? "Front and back package images analyzed successfully."
+          : "Package image analyzed successfully."
       );
     } catch (error) {
       console.error(error);
@@ -1806,7 +1985,7 @@ function App() {
       setScanState("error");
 
       showToast(
-        "OCR could not process this image. You can enter fields manually."
+        "OCR could not process the package images. You can enter fields manually."
       );
     } finally {
       if (worker) {
@@ -2110,6 +2289,18 @@ function App() {
       imagePreview:
         imagePreview,
 
+      packageImages:
+        {
+          front:
+            packageImages.front
+              ? packageImages.front.preview
+              : "",
+          back:
+            packageImages.back
+              ? packageImages.back.preview
+              : "",
+        },
+
       fields:
         Object.assign({}, fields),
 
@@ -2229,6 +2420,40 @@ function App() {
     );
 
     setImageFile(null);
+
+    var savedPackageImages =
+      normalizedRecord.packageImages || {
+        front: "",
+        back: "",
+      };
+
+    setPackageImages({
+      front:
+        savedPackageImages.front &&
+        !String(savedPackageImages.front).startsWith("blob:")
+          ? {
+              file: null,
+              preview:
+                savedPackageImages.front,
+            }
+          : null,
+      back:
+        savedPackageImages.back &&
+        !String(savedPackageImages.back).startsWith("blob:")
+          ? {
+              file: null,
+              preview:
+                savedPackageImages.back,
+            }
+          : null,
+    });
+
+    setSelectedImageSide(
+      savedPackageImages.back &&
+      !savedPackageImages.front
+        ? "back"
+        : "front"
+    );
 
     setFields(
       normalizedRecord.fields
@@ -3153,6 +3378,12 @@ function App() {
             imageFile={
               imageFile
             }
+            packageImages={
+              packageImages
+            }
+            selectedImageSide={
+              selectedImageSide
+            }
             scanState={
               scanState
             }
@@ -3230,6 +3461,9 @@ function App() {
             }
             onImage={
               handleImage
+            }
+            onSelectImageSide={
+              setSelectedImageSide
             }
             onScan={
               runOCR
@@ -3951,7 +4185,7 @@ function ScannerPage(props) {
         text={
           "Inspection ID " +
           props.inspectionId +
-          " • Capture, analyze and verify a package."
+          " • Capture both package panels, analyze and verify."
         }
         action={
           <button
@@ -4034,227 +4268,324 @@ function ScannerPage(props) {
               )}
             </div>
 
-            {!props.imagePreview ? (
-              <div>
-                <label className="upload-zone">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={function (
-                      event
-                    ) {
-                      props.onImage(
-                        event.target
-                          .files &&
-                          event.target
-                            .files[0]
-                      );
-                    }}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(auto-fit, minmax(240px, 1fr))",
+                gap: "14px",
+                marginBottom: "16px",
+              }}
+            >
+              {["front", "back"].map(
+                function (side) {
+                  var image =
+                    props.packageImages &&
+                    props.packageImages[side];
+
+                  return (
+                    <div
+                      key={side}
+                      style={{
+                        border:
+                          "1px solid var(--border, rgba(100,120,150,0.18))",
+                        borderRadius: "16px",
+                        padding: "12px",
+                        background:
+                          "var(--surface-soft, rgba(100,120,150,0.04))",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          marginBottom: "10px",
+                        }}
+                      >
+                        <strong
+                          style={{
+                            fontSize: "13px",
+                            textTransform:
+                              "uppercase",
+                            letterSpacing:
+                              "0.06em",
+                          }}
+                        >
+                          {side} side
+                        </strong>
+
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            opacity: 0.65,
+                          }}
+                        >
+                          {image
+                            ? "Captured"
+                            : "Required"}
+                        </span>
+                      </div>
+
+                      {image ? (
+                        <div
+                          style={{
+                            position:
+                              "relative",
+                            borderRadius: "12px",
+                            overflow:
+                              "hidden",
+                            background:
+                              "#050b14",
+                          }}
+                        >
+                          <img
+                            src={image.preview}
+                            alt={
+                              side +
+                              " side of packaged commodity"
+                            }
+                            className="product-image"
+                            style={{
+                              width: "100%",
+                              minHeight:
+                                "170px",
+                              objectFit:
+                                "contain",
+                            }}
+                          />
+
+                          <label
+                            className="change-image"
+                            style={{
+                              position:
+                                "absolute",
+                              right: "10px",
+                              bottom: "10px",
+                            }}
+                          >
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              onChange={function (
+                                event
+                              ) {
+                                props.onImage(
+                                  event.target
+                                    .files &&
+                                    event.target
+                                      .files[0],
+                                  side
+                                );
+                              }}
+                            />
+                            Change
+                          </label>
+                        </div>
+                      ) : (
+                        <label
+                          className="upload-zone"
+                          style={{
+                            minHeight:
+                              "190px",
+                            display: "flex",
+                            flexDirection:
+                              "column",
+                            justifyContent:
+                              "center",
+                            padding:
+                              "18px",
+                            cursor:
+                              "pointer",
+                          }}
+                          onClick={function () {
+                            props.onSelectImageSide(
+                              side
+                            );
+                          }}
+                        >
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={function (
+                              event
+                            ) {
+                              props.onImage(
+                                event.target
+                                  .files &&
+                                  event.target
+                                    .files[0],
+                                side
+                              );
+                            }}
+                          />
+
+                          <div className="upload-icon">
+                            <Icon
+                              name="upload"
+                              size={24}
+                            />
+                          </div>
+
+                          <strong
+                            style={{
+                              marginTop:
+                                "6px",
+                            }}
+                          >
+                            Upload {side} photo
+                          </strong>
+
+                          <small
+                            style={{
+                              marginTop:
+                                "5px",
+                              textAlign:
+                                "center",
+                            }}
+                          >
+                            Clear, straight-on
+                            photo recommended
+                          </small>
+                        </label>
+                      )}
+
+                      <button
+                        className={
+                          "secondary-button"
+                        }
+                        type="button"
+                        style={{
+                          width: "100%",
+                          marginTop: "10px",
+                        }}
+                        onClick={function () {
+                          props.onSelectImageSide(
+                            side
+                          );
+                          props.onOpenCamera();
+                        }}
+                      >
+                        <Icon
+                          name="camera"
+                          size={17}
+                        />
+                        Capture {side}
+                      </button>
+                    </div>
+                  );
+                }
+              )}
+            </div>
+
+            <div
+              style={{
+                padding: "12px 14px",
+                borderRadius: "12px",
+                background:
+                  "rgba(37, 99, 235, 0.07)",
+                border:
+                  "1px solid rgba(37, 99, 235, 0.16)",
+                fontSize: "12px",
+                lineHeight: 1.5,
+                marginBottom: "14px",
+              }}
+            >
+              <strong>
+                Capture both package panels
+              </strong>
+              <div style={{ marginTop: "3px" }}>
+                MetroCheck combines the front and back
+                images into one inspection. If a declaration
+                appears on another panel, the inspector can
+                add that evidence separately.
+              </div>
+            </div>
+
+            <div
+              className="scan-action-row"
+              style={{
+                justifyContent: "flex-end",
+              }}
+            >
+              <div className="file-meta">
+                <div className="file-meta-icon">
+                  <Icon
+                    name="file"
+                    size={18}
                   />
+                </div>
 
-                  <div className="upload-icon">
-                    <Icon
-                      name="upload"
-                      size={28}
-                    />
-                  </div>
+                <div>
+                  <strong>
+                    {props.packageImages &&
+                    props.packageImages.front &&
+                    props.packageImages.back
+                      ? "Front + back images ready"
+                      : props.packageImages &&
+                        (props.packageImages.front ||
+                          props.packageImages.back)
+                      ? "1 package panel ready"
+                      : "No package image selected"}
+                  </strong>
 
-                  <h3>
-                    Upload package image
-                  </h3>
-
-                  <p>
-                    Upload a clear
-                    photograph of the
-                    package or label.
-                  </p>
-
-                  <span className="upload-button">
-                    <Icon
-                      name="upload"
-                      size={17}
-                    />
-
-                    Choose Image
+                  <span>
+                    {props.packageImages &&
+                    props.packageImages.front &&
+                    props.packageImages.back
+                      ? "Ready for combined OCR analysis"
+                      : "Add front and back for the most complete inspection"}
                   </span>
-
-                  <small>
-                    JPG, PNG or WEBP •
-                    Clear text
-                    recommended
-                  </small>
-                </label>
-
-                <div
-                  style={{
-                    display:
-                      "flex",
-                    justifyContent:
-                      "center",
-                    marginTop:
-                      "14px",
-                  }}
-                >
-                  <button
-                    className="primary-button large"
-                    type="button"
-                    onClick={
-                      props.onOpenCamera
-                    }
-                  >
-                    <Icon
-                      name="camera"
-                      size={19}
-                    />
-
-                    Open Camera
-                  </button>
                 </div>
               </div>
-            ) : (
-              <div className="image-preview-wrap">
-                <img
-                  src={
-                    props.imagePreview
+
+              <button
+                className="primary-button"
+                onClick={
+                  props.onScan
+                }
+                disabled={
+                  props.scanState ===
+                  "scanning" ||
+                  !(
+                    props.packageImages &&
+                    (
+                      props.packageImages.front ||
+                      props.packageImages.back
+                    )
+                  )
+                }
+              >
+                <Icon
+                  name={
+                    props.scanState ===
+                    "scanning"
+                      ? "refresh"
+                      : "scan"
                   }
-                  alt="Uploaded packaged commodity"
-                  className="product-image"
+                  size={18}
                 />
 
-                <div className="image-overlay">
-                  <span>
-                    {props.imageFile
-                      ? props
-                          .imageFile
-                          .name
-                      : "Inspection image"}
-                  </span>
-
-                  <label className="change-image">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={function (
-                        event
-                      ) {
-                        props.onImage(
-                          event.target
-                            .files &&
-                            event.target
-                              .files[0]
-                        );
-                      }}
-                    />
-
-                    Change image
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {props.imagePreview && (
-              <div className="scan-action-row">
-                <div className="file-meta">
-                  <div className="file-meta-icon">
-                    <Icon
-                      name="file"
-                      size={18}
-                    />
-                  </div>
-
-                  <div>
-                    <strong>
-                      {props.imageFile
-                        ? props
-                            .imageFile
-                            .name
-                        : "Package image"}
-                    </strong>
-
-                    <span>
-                      {props.imageFile &&
-                      props.imageFile
-                        .size
-                        ? (
-                            props
-                              .imageFile
-                              .size /
-                            1024 /
-                            1024
-                          ).toFixed(
-                            2
-                          ) +
-                          " MB"
-                        : "Loaded inspection image"}
-                    </span>
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    display:
-                      "flex",
-                    gap: "8px",
-                    flexWrap:
-                      "wrap",
-                    justifyContent:
-                      "flex-end",
-                  }}
-                >
-                  <button
-                    className="secondary-button"
-                    onClick={
-                      props.onOpenCamera
-                    }
-                  >
-                    <Icon
-                      name="camera"
-                      size={18}
-                    />
-
-                    Camera
-                  </button>
-
-                  <button
-                    className="primary-button"
-                    onClick={
-                      props.onScan
-                    }
-                    disabled={
-                      props.scanState ===
-                      "scanning"
-                    }
-                  >
-                    <Icon
-                      name={
-                        props.scanState ===
-                        "scanning"
-                          ? "refresh"
-                          : "scan"
-                      }
-                      size={18}
-                    />
-
-                    {props.scanState ===
-                    "scanning"
-                      ? "Scanning..."
-                      : props.scanState ===
-                        "complete"
-                      ? "Scan Again"
-                      : "Run OCR Scan"}
-                  </button>
-                </div>
-              </div>
-            )}
+                {props.scanState ===
+                "scanning"
+                  ? "Scanning..."
+                  : props.scanState ===
+                    "complete"
+                  ? "Scan Again"
+                  : "Analyze Package"}
+              </button>
+            </div>
 
             {props.scanState ===
               "scanning" && (
               <div className="scan-progress-box">
                 <div className="scan-progress-top">
                   <span>
-                    Analyzing package image
+                    Analyzing package images
                   </span>
 
                   <strong>
@@ -5215,6 +5546,9 @@ function ScannerPage(props) {
           onCapture={
             props.onCapturePhoto
           }
+          selectedSide={
+            selectedImageSide
+          }
         />
       )}
     </div>
@@ -5269,7 +5603,7 @@ function CameraModal(props) {
                 margin: "4px 0 0",
               }}
             >
-              Capture package image
+              Capture {props.selectedSide === "front" ? "front" : "back"} side
             </h2>
           </div>
 
@@ -5365,8 +5699,8 @@ function CameraModal(props) {
                   "0 2px 8px rgba(0,0,0,0.8)",
               }}
             >
-              Align the package or
-              label inside the frame
+              Align the {props.selectedSide === "front" ? "front" : "back"} side
+              inside the frame
             </div>
           </div>
         )}
@@ -5409,7 +5743,7 @@ function CameraModal(props) {
               size={20}
             />
 
-            Capture Photo
+            Capture {props.selectedSide === "front" ? "Front" : "Back"} Photo
           </button>
         </div>
       </div>
