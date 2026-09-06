@@ -80,21 +80,54 @@ const RULES = [
     title: "Manufacturer / Packer / Importer",
     short: "Responsible entity declaration",
     severity: "High",
+    reference: "Rule 6(1)(a)",
     description:
-      "The package should identify the manufacturer, packer or importer as applicable.",
-    check: function (fields) {
-      return Boolean(fields.manufacturer || fields.importer);
+      "The applicable responsible entity and required address information should be declared. OCR presence is treated as a screening result; the inspector must visually verify the complete declaration.",
+    evaluate: function (fields) {
+      if (fields.manufacturer || fields.importer) {
+        return {
+          status: "PASS",
+          message:
+            "A responsible manufacturer, packer or importer declaration was identified. Verify the complete name and address on the package before finalizing.",
+        };
+      }
+      return {
+        status: "REVIEW REQUIRED",
+        message:
+          "A responsible entity declaration could not be identified by OCR. Inspect the package manually before deciding compliance.",
+      };
     },
   },
   {
     id: "origin",
     title: "Country of Origin",
-    short: "Origin declaration",
+    short: "Imported-product origin declaration",
     severity: "High",
+    reference: "Rule 6(1)(aa)",
     description:
-      "Imported commodities should carry the applicable country-of-origin declaration.",
-    check: function (fields) {
-      return Boolean(fields.countryOfOrigin);
+      "Country-of-origin declaration is specifically applicable to imported products. It is not treated as a universal failure for domestically made goods.",
+    evaluate: function (fields) {
+      if (!fields.importer) {
+        return {
+          status: "NOT APPLICABLE",
+          message:
+            "No importer declaration was identified. Country-of-origin checking is not automatically applicable to a domestic package; inspector verification is still required if import status is uncertain.",
+        };
+      }
+
+      if (fields.countryOfOrigin) {
+        return {
+          status: "PASS",
+          message:
+            "A country-of-origin declaration was identified for the package marked as imported.",
+        };
+      }
+
+      return {
+        status: "REVIEW REQUIRED",
+        message:
+          "An importer declaration was identified, but country of origin was not identified by OCR. Inspect the package and verify the imported-product declaration.",
+      };
     },
   },
   {
@@ -102,10 +135,21 @@ const RULES = [
     title: "Common / Generic Name",
     short: "Commodity identification",
     severity: "Medium",
+    reference: "Rule 6(1)(b)",
     description:
-      "The common or generic name of the commodity should be identifiable.",
-    check: function (fields) {
-      return Boolean(fields.productName);
+      "The common or generic name of the commodity should be identifiable on the package.",
+    evaluate: function (fields) {
+      return fields.productName
+        ? {
+            status: "PASS",
+            message:
+              "A common or generic commodity name was identified in the scanned declarations.",
+          }
+        : {
+            status: "REVIEW REQUIRED",
+            message:
+              "A common or generic name could not be identified by OCR. Verify the principal display panel manually.",
+          };
     },
   },
   {
@@ -113,76 +157,159 @@ const RULES = [
     title: "Net Quantity",
     short: "Quantity declaration",
     severity: "Critical",
+    reference: "Rule 6(1)(c), Rules 11–13",
     description:
-      "The package should declare its net quantity in an appropriate unit.",
-    check: function (fields) {
-      return Boolean(fields.netQuantity);
+      "The package should declare net quantity in the appropriate unit. Actual quantity verification is separate and must use the applicable legal measurement framework.",
+    evaluate: function (fields) {
+      return fields.netQuantity
+        ? {
+            status: "PASS",
+            message:
+              "A net-quantity declaration was identified. Physical quantity verification remains a separate inspector check.",
+          }
+        : {
+            status: "REVIEW REQUIRED",
+            message:
+              "A net-quantity declaration could not be identified by OCR. Verify the package manually before making a decision.",
+          };
     },
   },
   {
     id: "date",
-    title: "Date of Manufacture / Packing",
-    short: "Manufacturing information",
+    title: "Date of Manufacture / Packing / Import",
+    short: "Date declaration",
     severity: "Medium",
+    reference: "Rule 6(1)(d)",
     description:
-      "Applicable manufacturing or packing date information should be declared.",
-    check: function (fields) {
-      return Boolean(fields.manufactureDate);
+      "Applicable manufacture, packing or import-date requirements depend on the commodity and other applicable legislation, including specified exceptions.",
+    evaluate: function (fields) {
+      return fields.manufactureDate
+        ? {
+            status: "PASS",
+            message:
+              "A manufacture, packing or related date declaration was identified. Confirm that the date format and applicable commodity requirement are correct.",
+          }
+        : {
+            status: "REVIEW REQUIRED",
+            message:
+              "No applicable date declaration was identified by OCR. Because the Rules contain commodity-specific exceptions, an inspector must verify whether this declaration is required.",
+          };
     },
   },
   {
     id: "bestBefore",
     title: "Best Before / Use By",
-    short: "Validity information",
+    short: "Validity declaration where applicable",
     severity: "High",
+    reference: "Rule 6(1)(da)",
     description:
-      "Where applicable, the package should declare the relevant best-before or use-by information.",
-    check: function (fields) {
-      return Boolean(fields.bestBefore);
+      "Best-before/use-by information applies where the commodity may become unfit for human consumption, subject to applicable food or other legislation.",
+    evaluate: function (fields) {
+      if (fields.bestBefore) {
+        return {
+          status: "PASS",
+          message:
+            "A best-before/use-by declaration was identified. Verify that the applicable food or commodity rule is satisfied.",
+        };
+      }
+
+      return {
+        status: "REVIEW REQUIRED",
+        message:
+          "No best-before/use-by declaration was identified. Applicability must be confirmed for the specific commodity rather than treating every package as universally subject to this check.",
+      };
     },
   },
   {
     id: "mrp",
     title: "Maximum Retail Price",
-    short: "MRP inclusive of applicable taxes",
+    short: "Retail sale price declaration",
     severity: "Critical",
+    reference: "Rule 6(1)(e)",
     description:
-      "The applicable maximum retail price should be identifiable on the package.",
-    check: function (fields) {
-      return Boolean(fields.mrp);
+      "The retail sale price should be declared as the maximum retail price inclusive of applicable taxes and in the prescribed manner.",
+    evaluate: function (fields) {
+      return fields.mrp
+        ? {
+            status: "PASS",
+            message:
+              "An MRP declaration was identified. The inspector should visually verify that it is legible, properly expressed and not altered.",
+          }
+        : {
+            status: "REVIEW REQUIRED",
+            message:
+              "An MRP declaration could not be identified by OCR. Verify the package manually before making a decision.",
+          };
     },
   },
   {
     id: "consumer",
     title: "Consumer Care Details",
-    short: "Consumer contact information",
+    short: "Consumer complaint contact",
     severity: "Medium",
+    reference: "Rule 6(2)",
     description:
-      "Consumer care or complaint contact information should be available where applicable.",
-    check: function (fields) {
-      return Boolean(fields.consumerCare);
+      "The prescribed name/address and contact details for consumer complaints should be available. OCR presence alone does not prove completeness.",
+    evaluate: function (fields) {
+      return fields.consumerCare
+        ? {
+            status: "PASS",
+            message:
+              "Consumer-care/contact information was identified. Verify the complete prescribed contact details visually.",
+          }
+        : {
+            status: "REVIEW REQUIRED",
+            message:
+              "Consumer-care/contact information could not be identified by OCR. Inspect the package manually.",
+          };
     },
   },
   {
     id: "dimensions",
     title: "Dimensions",
-    short: "Dimension declaration",
+    short: "Dimension declaration where relevant",
     severity: "Low",
+    reference: "Rule 6(1)(f)",
     description:
-      "Dimensions should be declared for commodities where applicable.",
-    check: function (fields) {
-      return Boolean(fields.dimensions);
+      "Dimensions are not a universal package declaration; this check is only relevant to commodities for which dimensions are applicable.",
+    evaluate: function (fields) {
+      if (fields.dimensions) {
+        return {
+          status: "PASS",
+          message:
+            "A dimension declaration was identified. Confirm that dimensions are relevant to this commodity and that the declaration is correct.",
+        };
+      }
+
+      return {
+        status: "NOT APPLICABLE",
+        message:
+          "No dimension declaration was identified. Dimensions are not treated as a universal requirement; verify applicability for the commodity if relevant.",
+      };
     },
   },
   {
     id: "unitPrice",
     title: "Unit Sale Price",
-    short: "Unit price declaration",
+    short: "Unit price where applicable",
     severity: "Medium",
+    reference: "Rule 6(11)",
     description:
-      "Unit sale price is checked where applicable to the package category.",
-    check: function (fields) {
-      return Boolean(fields.unitSalePrice);
+      "Unit sale price follows the prescribed unit and rounding rules, with stated exceptions such as where the retail sale price equals the unit sale price.",
+    evaluate: function (fields) {
+      if (fields.unitSalePrice) {
+        return {
+          status: "PASS",
+          message:
+            "A unit-sale-price declaration was identified. Verify the prescribed unit, rounding and any applicable exception.",
+        };
+      }
+
+      return {
+        status: "REVIEW REQUIRED",
+        message:
+          "A unit-sale-price declaration was not identified by OCR. Verify applicability and the Rule 6(11) exceptions before deciding compliance.",
+      };
     },
   },
 ];
@@ -744,32 +871,23 @@ function buildQuantityVerification(
       : 0;
 
   /*
-   * Demonstration screening threshold only.
-   * This must not be presented as a universal statutory tolerance.
+   * Do not apply a universal percentage tolerance here.
+   * Legal quantity verification depends on the applicable commodity,
+   * permissible error and the prescribed sampling/testing framework.
+   * This screen therefore reports the arithmetic comparison and sends
+   * the legal determination to inspector review.
    */
-  var demonstrationThreshold =
-    declared.value * 0.02;
-
-  var withinDemonstrationThreshold =
-    absoluteDifference <= demonstrationThreshold;
-
-  var status = withinDemonstrationThreshold
-    ? "PASS"
-    : "REVIEW REQUIRED";
-
+  var status = "REVIEW REQUIRED";
   var message;
 
   if (difference >= 0) {
     message =
-      "The inspector-entered quantity is at or above the declared quantity. The comparison is within the prototype's demonstration screening threshold. Apply the applicable commodity-specific legal tolerance before enforcement.";
-  } else if (withinDemonstrationThreshold) {
-    message =
-      "The inspector-entered quantity is slightly below the declared quantity but remains within the prototype's demonstration screening threshold. The applicable commodity-specific legal tolerance must be checked before enforcement.";
+      "The inspector-entered quantity is at or above the declared quantity. The arithmetic comparison is shown for evidence only; the applicable commodity-specific legal tolerance and testing procedure must be applied before enforcement.";
   } else {
     message =
       "The inspector-entered quantity is below the declared quantity by " +
       differencePercent.toFixed(2) +
-      "%. Verify the instrument reading and apply the applicable commodity-specific Legal Metrology tolerance before making an enforcement decision.";
+      "%. This is a screening indication, not a statutory violation finding. Verify the instrument, applicable permissible error and prescribed testing procedure before making an enforcement decision.";
   }
 
   return {
@@ -829,18 +947,17 @@ function runCompliance(
   }
 
   var results = RULES.map(function (rule) {
-    var passed = rule.check(fields);
+    var evaluation = rule.evaluate(fields);
 
     return {
       id: rule.id,
       title: rule.title,
       short: rule.short,
       severity: rule.severity,
+      reference: rule.reference,
       description: rule.description,
-      status: passed ? "PASS" : "FAIL",
-      message: passed
-        ? "Required information appears to be present in the extracted declarations."
-        : "Required information could not be identified from the scanned declaration. Inspector verification is required.",
+      status: evaluation.status,
+      message: evaluation.message,
     };
   });
 
@@ -859,19 +976,13 @@ function runCompliance(
     quantityRule &&
     quantityVerification.available
   ) {
-    if (
-      quantityVerification.status ===
-      "PASS"
-    ) {
-      quantityRule.status = "PASS";
-      quantityRule.message =
-        "Declared quantity is present. " +
-        quantityVerification.message;
-    } else {
-      quantityRule.status = "FAIL";
-      quantityRule.message =
-        quantityVerification.message;
-    }
+    quantityRule.status =
+      quantityVerification.status === "PASS"
+        ? "PASS"
+        : "REVIEW REQUIRED";
+    quantityRule.message =
+      "Declared quantity is present. " +
+      quantityVerification.message;
   }
 
   return results;
@@ -882,12 +993,20 @@ function scoreResults(results) {
     return 0;
   }
 
-  var passed = results.filter(function (item) {
+  var applicable = results.filter(function (item) {
+    return item.status !== "NOT APPLICABLE";
+  });
+
+  if (!applicable.length) {
+    return 0;
+  }
+
+  var passed = applicable.filter(function (item) {
     return item.status === "PASS";
   }).length;
 
   return Math.round(
-    (passed / results.length) * 100
+    (passed / applicable.length) * 100
   );
 }
 
@@ -1040,7 +1159,7 @@ function buildInspectionIntelligence(fields, results, quantityVerification, ocrC
     actions.push("Verify missing declaration fields manually before making the final decision.");
   }
   if (failed.length) {
-    actions.push("Review every failed rule and attach supporting evidence before enforcement action.");
+    actions.push("Review every flagged rule and attach supporting evidence before making an enforcement decision.");
   }
   if (quantityVerification && quantityVerification.available && quantityVerification.status === "UNIT REVIEW") {
     actions.push("Resolve the declared-versus-measured unit mismatch before deciding compliance.");
@@ -5809,6 +5928,8 @@ function RuleCard(props) {
           name={
             rule.status === "PASS"
               ? "check"
+              : rule.status === "NOT APPLICABLE"
+              ? "info"
               : "warning"
           }
           size={17}
@@ -5863,21 +5984,17 @@ function RuleCard(props) {
           {rule.message}
         </p>
 
-        {rule.status ===
-          "FAIL" && (
-          <small
-            style={{
-              display: "block",
-              marginTop: "6px",
-              opacity: 0.75,
-            }}
-          >
-            Rule support:{" "}
-            {
-              rule.description
-            }
-          </small>
-        )}
+        <small
+          style={{
+            display: "block",
+            marginTop: "6px",
+            opacity: 0.75,
+          }}
+        >
+          Legal basis: {rule.reference}
+          {" • "}
+          {rule.description}
+        </small>
       </div>
     </div>
   );
@@ -6285,6 +6402,21 @@ function HistoryMetric(props) {
       >
         {props.value}
       </strong>
+    </div>
+  );
+}
+
+function AboutCard(props) {
+  return (
+    <div className="panel about-card">
+      <div className="about-card-icon">
+        <Icon name={props.icon || "info"} size={24} />
+      </div>
+
+      <div>
+        <h3>{props.title}</h3>
+        <p>{props.text}</p>
+      </div>
     </div>
   );
 }
