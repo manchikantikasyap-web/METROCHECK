@@ -808,6 +808,105 @@ function EmptyState(props) {
   );
 }
 
+
+function clampNumber(value, minimum, maximum) {
+  var number = Number(value);
+  if (!Number.isFinite(number)) return minimum;
+  return Math.min(maximum, Math.max(minimum, number));
+}
+
+function getOCRConfidence(response) {
+  var raw = response && response.data && Number(response.data.confidence);
+  if (!Number.isFinite(raw)) return null;
+  return Math.round(clampNumber(raw, 0, 100));
+}
+
+function getExtractionConfidence(fields, ocrConfidence) {
+  var values = Object.values(fields || {});
+  if (!values.length) return 0;
+  var present = values.filter(function (value) {
+    return String(value || "").trim().length > 0;
+  }).length;
+  var completeness = (present / values.length) * 100;
+  if (ocrConfidence === null || ocrConfidence === undefined) {
+    return Math.round(completeness);
+  }
+  return Math.round(clampNumber(
+    Number(ocrConfidence) * 0.7 + completeness * 0.3,
+    0,
+    100
+  ));
+}
+
+function buildInspectionIntelligence(fields, results, quantityVerification, ocrConfidence, decision, imagePreview) {
+  var missing = FIELD_CONFIG.filter(function (item) {
+    return !String(fields && fields[item[0]] || "").trim();
+  }).map(function (item) {
+    return item[1];
+  });
+
+  var failed = results.filter(function (item) {
+    return item.status === "FAIL";
+  });
+
+  var actions = [];
+  if (!imagePreview) {
+    actions.push("Capture or upload a clear package-label image.");
+  }
+  if (imagePreview && ocrConfidence !== null && ocrConfidence < 60) {
+    actions.push("OCR confidence is low. Retake the label image with better lighting, focus and less glare.");
+  }
+  if (missing.length) {
+    actions.push("Verify missing declaration fields manually before making the final decision.");
+  }
+  if (failed.length) {
+    actions.push("Review every failed rule and attach supporting evidence before enforcement action.");
+  }
+  if (quantityVerification && quantityVerification.available && quantityVerification.status === "UNIT REVIEW") {
+    actions.push("Resolve the declared-versus-measured unit mismatch before deciding compliance.");
+  }
+  if (quantityVerification && quantityVerification.available && quantityVerification.status === "REVIEW REQUIRED") {
+    actions.push("Recheck the instrument reading and apply the commodity-specific legal tolerance.");
+  }
+  if (!actions.length && results.length) {
+    actions.push("Screening checks are clear. Confirm the applicable commodity-specific requirements and inspector evidence before finalizing.");
+  }
+
+  var priority = failed.length ? failed.slice().sort(function (a, b) {
+    var rank = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+    return (rank[b.severity] || 0) - (rank[a.severity] || 0);
+  })[0] : null;
+
+  var readiness = 0;
+  if (imagePreview) readiness += 25;
+  if (results.length) readiness += 25;
+  if (!missing.length) readiness += 20;
+  if (quantityVerification && quantityVerification.available && quantityVerification.comparable) readiness += 15;
+  if (decision) readiness += 15;
+
+  return {
+    missing: missing,
+    failed: failed,
+    priority: priority,
+    actions: actions,
+    readiness: Math.round(clampNumber(readiness, 0, 100)),
+  };
+}
+
+function getEnvironmentReadiness() {
+  var secure = typeof window !== "undefined" && !!window.isSecureContext;
+  var storage = false;
+  try {
+    var key = "metrocheck_storage_test";
+    localStorage.setItem(key, "1");
+    localStorage.removeItem(key);
+    storage = true;
+  } catch (error) {
+    storage = false;
+  }
+  return { secure: secure, storage: storage };
+}
+
 function App() {
   var [page, setPage] =
     useState("dashboard");
@@ -864,6 +963,12 @@ function App() {
 
   var [scanProgress, setScanProgress] =
     useState(0);
+
+  var [ocrConfidence, setOCRConfidence] =
+    useState(null);
+
+  var [fieldSources, setFieldSources] =
+    useState({});
 
   var [toast, setToast] =
     useState("");
@@ -1003,6 +1108,37 @@ function App() {
     [results]
   );
 
+  var extractionConfidence = useMemo(
+    function () {
+      return getExtractionConfidence(
+        fields,
+        ocrConfidence
+      );
+    },
+    [fields, ocrConfidence]
+  );
+
+  var intelligence = useMemo(
+    function () {
+      return buildInspectionIntelligence(
+        fields,
+        results,
+        quantityVerification,
+        ocrConfidence,
+        decision,
+        imagePreview
+      );
+    },
+    [fields, results, quantityVerification, ocrConfidence, decision, imagePreview]
+  );
+
+  var environmentReadiness = useMemo(
+    function () {
+      return getEnvironmentReadiness();
+    },
+    []
+  );
+
   var passedCount =
     results.filter(function (item) {
       return item.status === "PASS";
@@ -1111,6 +1247,8 @@ function App() {
 
     setScanState("idle");
     setScanProgress(0);
+    setOCRConfidence(null);
+    setFieldSources({});
 
     setCameraOpen(false);
     setCameraError("");
@@ -1152,6 +1290,8 @@ function App() {
     setScanState("ready");
     setScanProgress(0);
     setOcrText("");
+    setOCRConfidence(null);
+    setFieldSources({});
 
     setFields(
       Object.assign({}, EMPTY_FIELDS)
@@ -1333,6 +1473,8 @@ function App() {
         setScanState("ready");
         setScanProgress(0);
         setOcrText("");
+        setOCRConfidence(null);
+        setFieldSources({});
 
         setFields(
           Object.assign(
@@ -1386,11 +1528,20 @@ function App() {
           : ""
       );
 
+      var confidence = getOCRConfidence(response);
+      setOCRConfidence(confidence);
       setOcrText(text);
 
-      var extracted =
-        extractFields(text);
+      var extracted = extractFields(text);
+      var extractedSources = {};
 
+      Object.keys(extracted).forEach(function (key) {
+        if (String(extracted[key] || "").trim()) {
+          extractedSources[key] = "OCR";
+        }
+      });
+
+      setFieldSources(extractedSources);
       setFields(extracted);
 
       setScanProgress(100);
@@ -1425,6 +1576,16 @@ function App() {
         previous,
         {
           [key]: value,
+        }
+      );
+    });
+
+    setFieldSources(function (previous) {
+      return Object.assign(
+        {},
+        previous,
+        {
+          [key]: "MANUAL",
         }
       );
     });
@@ -1573,6 +1734,12 @@ function App() {
       score:
         finalScore,
 
+      ocrConfidence:
+        ocrConfidence,
+
+      extractionConfidence:
+        extractionConfidence,
+
       ruleResults:
         finalResults,
 
@@ -1663,6 +1830,15 @@ function App() {
     setOcrText(
       normalizedRecord.ocrText || ""
     );
+
+    setOCRConfidence(
+      normalizedRecord.ocrConfidence !== null &&
+      normalizedRecord.ocrConfidence !== undefined
+        ? Number(normalizedRecord.ocrConfidence)
+        : null
+    );
+
+    setFieldSources({});
 
     setPhysicalQuantity(
       normalizedRecord.physicalQuantity ||
@@ -2537,6 +2713,21 @@ function App() {
             }
             scanProgress={
               scanProgress
+            }
+            ocrConfidence={
+              ocrConfidence
+            }
+            extractionConfidence={
+              extractionConfidence
+            }
+            fieldSources={
+              fieldSources
+            }
+            intelligence={
+              intelligence
+            }
+            environmentReadiness={
+              environmentReadiness
             }
             ocrText={
               ocrText
@@ -3659,6 +3850,60 @@ function ScannerPage(props) {
             )}
           </div>
 
+          {props.imagePreview && (
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <span className="panel-kicker">PHASE 4 INTELLIGENCE</span>
+                  <h3>Scan confidence & readiness</h3>
+                </div>
+                <StatusBadge
+                  status={
+                    props.ocrConfidence === null
+                      ? "PENDING"
+                      : props.ocrConfidence >= 75
+                      ? "HIGH CONFIDENCE"
+                      : props.ocrConfidence >= 60
+                      ? "MEDIUM CONFIDENCE"
+                      : "LOW CONFIDENCE"
+                  }
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                  gap: "12px",
+                }}
+              >
+                <div className="mini-stat">
+                  <strong>{props.ocrConfidence === null ? "—" : props.ocrConfidence + "%"}</strong>
+                  <span>OCR confidence</span>
+                </div>
+                <div className="mini-stat">
+                  <strong>{props.extractionConfidence + "%"}</strong>
+                  <span>Extraction readiness</span>
+                </div>
+                <div className="mini-stat">
+                  <strong>{props.intelligence.readiness + "%"}</strong>
+                  <span>Inspection readiness</span>
+                </div>
+              </div>
+
+              {props.ocrConfidence !== null && props.ocrConfidence < 60 && (
+                <div className="inspector-note" style={{ marginTop: "12px" }}>
+                  <Icon name="warning" size={18} />
+                  <span>
+                    <strong>Low-confidence scan</strong>
+                    <br />
+                    Retake the image before relying heavily on OCR output.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="panel">
             <div className="panel-header">
               <div>
@@ -3716,7 +3961,18 @@ function ScannerPage(props) {
                       key={key}
                     >
                       <label>
-                        {label}
+                        <span>{label}</span>
+                        {props.fieldSources && props.fieldSources[key] ? (
+                          <span
+                            style={{
+                              marginLeft: "8px",
+                              fontSize: "11px",
+                              opacity: 0.7,
+                            }}
+                          >
+                            {props.fieldSources[key] === "OCR" ? "OCR" : "MANUAL"}
+                          </span>
+                        ) : null}
                       </label>
 
                       <input
@@ -3981,7 +4237,74 @@ function ScannerPage(props) {
                 }
               />
             </div>
+
+            <div
+              style={{
+                marginTop: "14px",
+                padding: "10px 12px",
+                borderRadius: "10px",
+                border: "1px solid currentColor",
+                fontSize: "12px",
+              }}
+            >
+              <strong>Demo environment</strong>
+              <div style={{ marginTop: "5px", opacity: 0.8 }}>
+                Camera security: {props.environmentReadiness.secure ? "Ready" : "Use HTTPS / localhost"}
+                <br />
+                Local history storage: {props.environmentReadiness.storage ? "Ready" : "Unavailable"}
+              </div>
+            </div>
           </div>
+
+          {props.results.length > 0 && (
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <span className="panel-kicker">DECISION SUPPORT</span>
+                  <h3>Recommended inspector actions</h3>
+                </div>
+                {props.intelligence.priority && (
+                  <StatusBadge status="PRIORITY REVIEW" />
+                )}
+              </div>
+
+              {props.intelligence.priority && (
+                <div
+                  style={{
+                    padding: "12px",
+                    borderRadius: "10px",
+                    border: "1px solid currentColor",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <strong>Priority: {props.intelligence.priority.title}</strong>
+                  <p style={{ margin: "6px 0 0" }}>
+                    {props.intelligence.priority.message}
+                  </p>
+                </div>
+              )}
+
+              <div style={{ display: "grid", gap: "8px" }}>
+                {props.intelligence.actions.map(function (action, index) {
+                  return (
+                    <div
+                      key={action + index}
+                      style={{ display: "flex", gap: "9px", alignItems: "flex-start" }}
+                    >
+                      <Icon name="arrow" size={16} />
+                      <span>{action}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {props.intelligence.missing.length > 0 && (
+                <div style={{ marginTop: "12px", fontSize: "13px", opacity: 0.8 }}>
+                  Missing / unconfirmed fields: {props.intelligence.missing.join(", ")}.
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="panel">
             <div className="panel-header">
@@ -4718,6 +5041,18 @@ function RuleCard(props) {
                 rule.severity
               }
             </span>
+
+            {rule.status === "FAIL" && rule.severity === "HIGH" && (
+              <span
+                style={{
+                  fontSize: "10px",
+                  fontWeight: 700,
+                  letterSpacing: "0.05em",
+                }}
+              >
+                PRIORITY
+              </span>
+            )}
 
             <StatusBadge
               status={
