@@ -1,6 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useMemo, useRef, useState } from "react";
 import { createWorker } from "tesseract.js";
 import { jsPDF } from "jspdf";
+import { supabaseConfigError, supabaseReady } from "./supabase";
+import {
+  clearCloudHistory,
+  deleteCloudInspection,
+  getInspectorProfile,
+  loadCloudHistory,
+  loginInspectorWithSupabase,
+  logoutInspectorFromSupabase,
+  observeAuthSession,
+  registerInspectorWithSupabase,
+  saveCloudInspection,
+  updateInspectorProfile,
+} from "./supabaseServices";
 import "./App.css";
 
 const HISTORY_KEY = "metrocheck_inspections_v8";
@@ -1290,7 +1303,7 @@ function getEnvironmentReadiness() {
   } catch (error) {
     storage = false;
   }
-  return { secure: secure, storage: storage };
+  return { secure: secure, storage: storage, cloud: supabaseReady };
 }
 
 function App() {
@@ -1392,10 +1405,18 @@ function App() {
 
   var [authenticatedInspectorId, setAuthenticatedInspectorId] =
     useState(
-      initialAuthenticatedAccount
+      supabaseReady
+        ? ""
+        : initialAuthenticatedAccount
         ? initialAuthenticatedAccount.id
         : ""
     );
+
+  var [supabaseUserUid, setSupabaseUserUid] =
+    useState("");
+
+  var [authInitializing, setAuthInitializing] =
+    useState(supabaseReady);
 
   var [scanState, setScanState] =
     useState("idle");
@@ -1437,6 +1458,10 @@ function App() {
   var activeCameraSideRef = useRef("front");
 
   useEffect(function () {
+    if (supabaseReady) {
+      return;
+    }
+
     var allHistory = getAllStoredHistory();
     var migrated = allHistory.map(function (record) {
       var ownerId = getHistoryOwnerId(record);
@@ -1461,9 +1486,127 @@ function App() {
   }, [currentInspectorId]);
 
   useEffect(function () {
+    if (supabaseReady) {
+      return;
+    }
+
     saveInspectorAccounts(inspectorAccounts);
     saveCurrentInspectorId(currentInspectorId);
   }, [inspectorAccounts, currentInspectorId]);
+
+  useEffect(function () {
+    if (!supabaseReady) {
+      setAuthInitializing(false);
+      return undefined;
+    }
+
+    var cancelled = false;
+
+    var unsubscribe = observeAuthSession(async function (user) {
+      if (cancelled) {
+        return;
+      }
+
+      if (!user) {
+        setSupabaseUserUid("");
+        setAuthenticatedInspectorId("");
+        setHistory([]);
+        setAuthInitializing(false);
+        return;
+      }
+
+      try {
+        var profile = await getInspectorProfile(user.id);
+
+        if (!profile || !profile.verified) {
+          await logoutInspectorFromSupabase();
+          if (!cancelled) {
+            setSupabaseUserUid("");
+            setAuthenticatedInspectorId("");
+            setAuthInitializing(false);
+            setToast(
+              "This Supabase account does not have a verified MetroCheck inspector profile."
+            );
+          }
+          return;
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setSupabaseUserUid(user.id);
+        setCurrentInspectorId(profile.id);
+        setInspector(Object.assign({}, profile));
+        setInspectorAccounts([Object.assign({}, profile)]);
+        setAuthenticatedInspectorId(profile.id);
+        setAuthInitializing(false);
+      } catch (error) {
+        console.error("MetroCheck Supabase session restore failed:", error);
+        if (!cancelled) {
+          setSupabaseUserUid("");
+          setAuthenticatedInspectorId("");
+          setAuthInitializing(false);
+          setToast("Could not restore the MetroCheck cloud session.");
+        }
+      }
+    });
+
+    return function () {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  /*
+   * Startup failsafe: never leave the application stuck on the session-restoring
+   * screen indefinitely if a browser extension/network issue prevents Supabase
+   * from answering. Normal auth restoration usually completes almost instantly.
+   */
+  useEffect(function () {
+    if (!supabaseReady || !authInitializing) {
+      return undefined;
+    }
+
+    var timer = window.setTimeout(function () {
+      setAuthInitializing(false);
+    }, 8000);
+
+    return function () {
+      window.clearTimeout(timer);
+    };
+  }, [authInitializing]);
+
+  useEffect(function () {
+    if (!supabaseReady || !supabaseUserUid) {
+      return undefined;
+    }
+
+    var cancelled = false;
+
+    loadCloudHistory(supabaseUserUid)
+      .then(function (records) {
+        if (cancelled) {
+          return;
+        }
+
+        setHistory(
+          records.map(normalizeHistoryRecord).sort(function (a, b) {
+            return getRecordTimestamp(b) - getRecordTimestamp(a);
+          })
+        );
+      })
+      .catch(function (error) {
+        console.error("MetroCheck cloud history load failed:", error);
+        if (!cancelled) {
+          setToast("Could not load inspection history from Supabase.");
+        }
+      });
+
+    return function () {
+      cancelled = true;
+    };
+  }, [supabaseUserUid]);
 
   useEffect(
     function () {
@@ -2352,9 +2495,18 @@ function App() {
         });
       });
     }
+
+    if (supabaseReady && supabaseUserUid) {
+      updateInspectorProfile(supabaseUserUid, { [key]: nextValue }).catch(
+        function (error) {
+          console.error("MetroCheck profile update failed:", error);
+          showToast("Profile change could not be synced to Supabase.");
+        }
+      );
+    }
   }
 
-  function registerInspector(registration) {
+  async function registerInspector(registration) {
     var cleanId = String(
       registration && registration.id || ""
     ).trim().toUpperCase();
@@ -2391,6 +2543,49 @@ function App() {
         "Inspector could not be verified against the government registry."
       );
       return false;
+    }
+
+    if (supabaseReady) {
+      try {
+        var registered = await registerInspectorWithSupabase(
+          registryRecord,
+          password
+        );
+
+        if (registered.confirmationRequired || !registered.profile) {
+          showToast(
+            "Account created. Confirm the email if Supabase email confirmation is enabled, then sign in."
+          );
+          return true;
+        }
+
+        var cloudAccount = Object.assign({}, registered.profile);
+
+        setSupabaseUserUid(registered.user.id);
+        setInspectorAccounts([cloudAccount]);
+        setCurrentInspectorId(cloudAccount.id);
+        setInspector(cloudAccount);
+        setAuthenticatedInspectorId(cloudAccount.id);
+        setSettingsOpen(false);
+        resetInspection();
+        showToast("Inspector verified and cloud account created.");
+        return true;
+      } catch (error) {
+        console.error("MetroCheck Supabase registration failed:", error);
+        var errorText = String(
+          error && error.message ? error.message : ""
+        ).toLowerCase();
+        var registrationMessage =
+          errorText.includes("already") ||
+          errorText.includes("registered") ||
+          errorText.includes("exists")
+            ? "This official email is already registered. Please sign in."
+            : errorText.includes("inspector") || errorText.includes("registry")
+            ? "This inspector is not approved in the MetroCheck Supabase registry."
+            : "Could not create the Supabase inspector account. Check your Supabase setup and try again.";
+        showToast(registrationMessage);
+        return false;
+      }
     }
 
     var existing = inspectorAccounts.find(
@@ -2440,6 +2635,8 @@ function App() {
   }
 
   function demoLogin() {
+    setSupabaseUserUid("");
+
     var demoAccount = inspectorAccounts.find(function (account) {
       return account.id === "INS-001";
     }) || {
@@ -2461,9 +2658,34 @@ function App() {
     showToast("Demo Inspector signed in.");
   }
 
-  function loginInspector(email, password) {
+  async function loginInspector(email, password) {
     var cleanEmail = String(email || "").trim().toLowerCase();
     var cleanPassword = String(password || "");
+
+    if (supabaseReady) {
+      try {
+        var loggedIn = await loginInspectorWithSupabase(
+          cleanEmail,
+          cleanPassword
+        );
+        var cloudAccount = Object.assign({}, loggedIn.profile);
+
+        setSupabaseUserUid(loggedIn.user.id);
+        setInspectorAccounts([cloudAccount]);
+        setCurrentInspectorId(cloudAccount.id);
+        setInspector(cloudAccount);
+        setAuthenticatedInspectorId(cloudAccount.id);
+        resetInspection();
+        showToast("Welcome back, " + cloudAccount.name + ".");
+        return true;
+      } catch (error) {
+        console.error("MetroCheck Supabase login failed:", error);
+        showToast(
+          "Invalid Supabase account details or the inspector profile is not verified."
+        );
+        return false;
+      }
+    }
 
     var account = inspectorAccounts.find(
       function (item) {
@@ -2493,10 +2715,21 @@ function App() {
     return true;
   }
 
-  function logoutInspector() {
+  async function logoutInspector() {
     stopCamera();
+
+    if (supabaseReady && supabaseUserUid) {
+      try {
+        await logoutInspectorFromSupabase();
+      } catch (error) {
+        console.error("MetroCheck Supabase logout failed:", error);
+      }
+    }
+
     saveAuthSessionId("");
+    setSupabaseUserUid("");
     setAuthenticatedInspectorId("");
+    setHistory([]);
     setSettingsOpen(false);
     setPage("dashboard");
     showToast("Signed out of MetroCheck.");
@@ -2520,6 +2753,7 @@ function App() {
           size: file.size,
           type: file.type,
           addedAt: Date.now(),
+          file: file,
         };
       });
 
@@ -2545,7 +2779,7 @@ function App() {
     });
   }
 
-  function saveInspection() {
+  async function saveInspection() {
     if (
       !hasInspectionData(
         fields,
@@ -2668,6 +2902,53 @@ function App() {
       timestamp:
         savedTimestamp,
     };
+
+    if (supabaseReady && supabaseUserUid) {
+      try {
+        showToast("Saving inspection to Supabase…");
+
+        var cloudRecord = await saveCloudInspection(
+          record,
+          packageImages,
+          evidence,
+          supabaseUserUid
+        );
+
+        var normalizedCloudRecord = normalizeHistoryRecord(cloudRecord);
+
+        setHistory(function (previous) {
+          return [
+            normalizedCloudRecord,
+            ...previous.filter(function (item) {
+              return item.id !== inspectionId;
+            }),
+          ].sort(function (a, b) {
+            return getRecordTimestamp(b) - getRecordTimestamp(a);
+          });
+        });
+
+        setImagePreview(normalizedCloudRecord.imagePreview || "");
+        setPackageImages({
+          front: normalizedCloudRecord.packageImages && normalizedCloudRecord.packageImages.front
+            ? { file: null, preview: normalizedCloudRecord.packageImages.front }
+            : null,
+          back: normalizedCloudRecord.packageImages && normalizedCloudRecord.packageImages.back
+            ? { file: null, preview: normalizedCloudRecord.packageImages.back }
+            : null,
+        });
+        setEvidence(normalizedCloudRecord.evidence || []);
+        setDecision(finalStatus);
+        showToast("Inspection saved securely to Supabase.");
+        navigate("history");
+        return;
+      } catch (error) {
+        console.error("MetroCheck cloud inspection save failed:", error);
+        showToast(
+          "Inspection could not be saved to Supabase. Check your connection and Supabase rules."
+        );
+        return;
+      }
+    }
 
     var normalizedRecord =
       normalizeHistoryRecord(record);
@@ -2827,7 +3108,23 @@ function App() {
     navigate("scanner");
   }
 
-  function deleteInspection(id) {
+  async function deleteInspection(id) {
+    if (supabaseReady && supabaseUserUid) {
+      try {
+        await deleteCloudInspection(id, supabaseUserUid);
+        setHistory(function (previous) {
+          return previous.filter(function (item) {
+            return item.id !== id;
+          });
+        });
+        showToast("Inspection removed from Supabase.");
+      } catch (error) {
+        console.error("MetroCheck cloud delete failed:", error);
+        showToast("Inspection could not be deleted from Supabase.");
+      }
+      return;
+    }
+
     var allHistory = getAllStoredHistory();
     var nextAll = allHistory.filter(function (item) {
       return item.id !== id;
@@ -2848,7 +3145,7 @@ function App() {
     );
   }
 
-  function clearHistory() {
+  async function clearHistory() {
     if (!history.length) {
       return;
     }
@@ -2859,6 +3156,18 @@ function App() {
       );
 
     if (!confirmed) {
+      return;
+    }
+
+    if (supabaseReady && supabaseUserUid) {
+      try {
+        await clearCloudHistory(supabaseUserUid);
+        setHistory([]);
+        showToast("Your Supabase inspection history was cleared.");
+      } catch (error) {
+        console.error("MetroCheck cloud history clear failed:", error);
+        showToast("Inspection history could not be cleared from Supabase.");
+      }
       return;
     }
 
@@ -3395,6 +3704,26 @@ function App() {
     );
   }
 
+  if (authInitializing) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "24px",
+          background: darkMode ? "#0b1220" : "#f4f7fb",
+          color: darkMode ? "#f8fafc" : "#172033",
+          fontFamily: "inherit",
+          fontWeight: 700,
+        }}
+      >
+        Restoring secure MetroCheck session…
+      </div>
+    );
+  }
+
   if (!authenticatedInspectorId) {
     return (
       <InspectorAuthPage
@@ -3408,6 +3737,8 @@ function App() {
         onLogin={loginInspector}
         onDemoLogin={demoLogin}
         toast={toast}
+        cloudReady={supabaseReady}
+        cloudError={supabaseConfigError}
       />
     );
   }
@@ -5409,7 +5740,7 @@ function ScannerPage(props) {
               <div style={{ marginTop: "5px", opacity: 0.8 }}>
                 Camera security: {props.environmentReadiness.secure ? "Ready" : "Use HTTPS / localhost"}
                 <br />
-                Local history storage: {props.environmentReadiness.storage ? "Ready" : "Unavailable"}
+                Data storage: {props.environmentReadiness.cloud ? "Supabase Cloud" : props.environmentReadiness.storage ? "Browser LocalStorage" : "Unavailable"}
               </div>
             </div>
           </div>
@@ -7375,6 +7706,27 @@ function InspectorAuthPage(props) {
             </p>
           </div>
 
+          {!props.cloudReady && props.cloudError && (
+            <div
+              role="alert"
+              style={{
+                marginBottom: "16px",
+                padding: "12px 14px",
+                borderRadius: "12px",
+                border: "1px solid #f0b429",
+                background: darkMode ? "#3a2b0d" : "#fff8e1",
+                color: darkMode ? "#fde68a" : "#8a5a00",
+                fontSize: "12px",
+                lineHeight: 1.55,
+              }}
+            >
+              <strong style={{ display: "block", marginBottom: "4px" }}>
+                Cloud connection needs attention
+              </strong>
+              {props.cloudError}
+            </div>
+          )}
+
           <div
             style={{
               display: "grid",
@@ -7866,7 +8218,7 @@ function SettingsModal(props) {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
                   <StatusBox label="Browser security" value={environmentReadiness.secure ? "Ready" : "Local browser mode"} />
-                  <StatusBox label="Local storage" value={environmentReadiness.storage ? "Available" : "Unavailable"} />
+                  <StatusBox label="Database" value={environmentReadiness.cloud ? "Supabase Cloud" : environmentReadiness.storage ? "LocalStorage fallback" : "Unavailable"} />
                   <StatusBox label="Account model" value="Government registry verification" />
                   <StatusBox label="History isolation" value="Inspector ID scoped" />
                 </div>
@@ -7923,4 +8275,111 @@ function StatusBox(props) {
   );
 }
 
-export default App;
+class MetroCheckErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = {
+      error: null,
+    };
+  }
+
+  static getDerivedStateFromError(error) {
+    return {
+      error: error || new Error("Unknown MetroCheck rendering error"),
+    };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("MetroCheck render failure:", error, info);
+  }
+
+  render() {
+    if (!this.state.error) {
+      return this.props.children;
+    }
+
+    var message =
+      this.state.error && this.state.error.message
+        ? String(this.state.error.message)
+        : "MetroCheck encountered an unexpected rendering error.";
+
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "24px",
+          boxSizing: "border-box",
+          background: "#f4f7fb",
+          color: "#172033",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        }}
+      >
+        <div
+          style={{
+            width: "min(680px, 100%)",
+            padding: "24px",
+            borderRadius: "16px",
+            background: "#ffffff",
+            border: "1px solid #e4e9f1",
+            boxShadow: "0 18px 55px rgba(22,45,79,0.12)",
+          }}
+        >
+          <div style={{ fontSize: "12px", fontWeight: 900, color: "#1769ff" }}>
+            METROCHECK RECOVERY SCREEN
+          </div>
+          <h1 style={{ margin: "8px 0 10px", fontSize: "24px" }}>
+            The app hit a rendering error
+          </h1>
+          <p style={{ margin: 0, lineHeight: 1.6, color: "#667085" }}>
+            The page is no longer allowed to fail silently. The browser reported:
+          </p>
+          <pre
+            style={{
+              margin: "14px 0",
+              padding: "12px",
+              borderRadius: "10px",
+              background: "#f8fafc",
+              border: "1px solid #e4e9f1",
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+              fontSize: "12px",
+            }}
+          >
+            {message}
+          </pre>
+          <button
+            type="button"
+            onClick={function () {
+              window.location.reload();
+            }}
+            style={{
+              minHeight: "42px",
+              padding: "0 16px",
+              borderRadius: "9px",
+              border: 0,
+              background: "#1769ff",
+              color: "#ffffff",
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+          >
+            Reload MetroCheck
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+function MetroCheckRoot() {
+  return (
+    <MetroCheckErrorBoundary>
+      <App />
+    </MetroCheckErrorBoundary>
+  );
+}
+
+export default MetroCheckRoot;
