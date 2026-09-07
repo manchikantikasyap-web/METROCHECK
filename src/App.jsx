@@ -7503,7 +7503,7 @@ function AboutPage() {
         <AboutCard
           icon="file"
           title="Evidence & Reports"
-          text="Inspection records can be saved locally and exported as structured PDF reports."
+          text="Inspection records, package images and supporting evidence can be stored securely and exported as structured PDF reports."
         />
       </div>
 
@@ -7538,19 +7538,34 @@ function AboutPage() {
           legal verification.
         </p>
       </section>
+
+      <section className="panel legal-panel">
+        <div className="panel-header">
+          <div>
+            <span className="panel-kicker">
+              PROJECT CONTEXT
+            </span>
+
+            <h3>
+              Built around a real public-sector challenge
+            </h3>
+          </div>
+        </div>
+
+        <p>
+          This prototype was developed in response to Smart India Hackathon
+          2026 Problem Statement SIH26034 from the Ministry of Consumer
+          Affairs, Food &amp; Public Distribution. MetroCheck is an independent
+          student prototype and does not represent an official government
+          service.
+        </p>
+      </section>
     </div>
   );
 }
 
 function InspectorAuthPage(props) {
   var darkMode = props.darkMode;
-  var surface = darkMode ? "#111827" : "#ffffff";
-  var text = darkMode ? "#f8fafc" : "#172033";
-  var muted = darkMode ? "#aab4c4" : "#697586";
-  var border = darkMode ? "#2d3748" : "#e2e8f0";
-  var softBackground = darkMode ? "#172033" : "#f4f7fb";
-  var inputBackground = darkMode ? "#182233" : "#f8fafc";
-
   var [mode, setMode] = useState("login");
   var [inspectorId, setInspectorId] = useState("");
   var [email, setEmail] = useState("");
@@ -7576,439 +7591,1216 @@ function InspectorAuthPage(props) {
     });
   }
 
-  var fieldStyle = {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "13px 14px",
-    borderRadius: "12px",
-    border: "1px solid " + border,
-    background: inputBackground,
-    color: text,
-    outline: "none",
-    fontSize: "14px",
-  };
-
-  var primaryButtonStyle = {
-    width: "100%",
-    padding: "13px 16px",
-    borderRadius: "12px",
-    border: "none",
-    background: "#2563eb",
-    color: "#ffffff",
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: "14px",
+  var themeVariables = {
+    "--mc-auth-bg": darkMode ? "#07101d" : "#f3f6fb",
+    "--mc-auth-surface": darkMode ? "#0d1928" : "#ffffff",
+    "--mc-auth-surface-2": darkMode ? "#101f31" : "#f8fafd",
+    "--mc-auth-surface-3": darkMode ? "#14263b" : "#eef4ff",
+    "--mc-auth-text": darkMode ? "#f8fbff" : "#102033",
+    "--mc-auth-muted": darkMode ? "#9fb0c4" : "#66758a",
+    "--mc-auth-border": darkMode ? "#25384e" : "#dfe7f1",
+    "--mc-auth-border-strong": darkMode ? "#35506f" : "#c9d7e8",
+    "--mc-auth-input": darkMode ? "#101d2d" : "#fbfcfe",
+    "--mc-auth-blue": "#1769ff",
+    "--mc-auth-blue-2": "#0c56d8",
+    "--mc-auth-blue-soft": darkMode ? "rgba(23,105,255,0.14)" : "#eaf2ff",
+    "--mc-auth-green": darkMode ? "#63d7aa" : "#128a5a",
+    "--mc-auth-amber": "#e7a316",
+    "--mc-auth-shadow": darkMode
+      ? "0 32px 90px rgba(0,0,0,0.42)"
+      : "0 32px 90px rgba(25,55,95,0.12)",
   };
 
   return (
     <div
-      style={{
-        minHeight: "100vh",
-        background: darkMode ? "#0b1220" : "#f4f7fb",
-        color: text,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "24px",
-        boxSizing: "border-box",
-      }}
+      className="mc-auth-page"
+      data-dark={darkMode ? "true" : "false"}
+      style={themeVariables}
     >
-      <div
-        style={{
-          width: "min(980px, 100%)",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-          gap: "18px",
-        }}
-      >
-        <section
-          style={{
-            background: surface,
-            border: "1px solid " + border,
-            borderRadius: "22px",
-            padding: "28px",
-            boxShadow: "0 20px 60px rgba(0, 0, 0, 0.10)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "14px",
-              marginBottom: "24px",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 900,
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: muted,
-                }}
-              >
-                MetroCheck
-              </div>
-              <h1
-                style={{
-                  margin: "8px 0 0",
-                  fontSize: "30px",
-                  lineHeight: 1.1,
-                }}
-              >
-                Inspector Portal
-              </h1>
+      <style>{`
+        .mc-auth-page,
+        .mc-auth-page * {
+          box-sizing: border-box;
+        }
+
+        .mc-auth-page {
+          min-height: 100vh;
+          position: relative;
+          overflow: hidden;
+          padding: 24px;
+          color: var(--mc-auth-text);
+          background:
+            radial-gradient(circle at 14% 8%, rgba(23,105,255,0.12), transparent 24%),
+            radial-gradient(circle at 86% 12%, rgba(50,115,255,0.08), transparent 23%),
+            linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)),
+            var(--mc-auth-bg);
+        }
+
+        .mc-auth-page::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: ${darkMode ? "0.17" : "0.34"};
+          background-image:
+            linear-gradient(rgba(81,112,148,0.055) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(81,112,148,0.055) 1px, transparent 1px);
+          background-size: 46px 46px;
+          mask-image: linear-gradient(to bottom, rgba(0,0,0,0.75), transparent 82%);
+        }
+
+        .mc-auth-shell {
+          position: relative;
+          z-index: 1;
+          width: min(1240px, 100%);
+          min-height: calc(100vh - 48px);
+          margin: 0 auto;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .mc-auth-topbar {
+          min-height: 58px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 18px;
+          padding: 0 2px;
+        }
+
+        .mc-auth-brand {
+          display: flex;
+          align-items: center;
+          gap: 13px;
+          min-width: 0;
+        }
+
+        .mc-auth-brand-mark {
+          width: 44px;
+          height: 44px;
+          border-radius: 14px;
+          display: grid;
+          place-items: center;
+          flex: 0 0 auto;
+          position: relative;
+          overflow: hidden;
+          color: #ffffff;
+          font-family: Manrope, sans-serif;
+          font-size: 13px;
+          font-weight: 900;
+          letter-spacing: -0.02em;
+          background:
+            linear-gradient(145deg, rgba(255,255,255,0.18), transparent 42%),
+            linear-gradient(145deg, var(--mc-auth-blue), var(--mc-auth-blue-2));
+          box-shadow: 0 12px 28px rgba(23,105,255,0.26);
+        }
+
+        .mc-auth-brand-mark::after {
+          content: "";
+          position: absolute;
+          width: 28px;
+          height: 28px;
+          right: -10px;
+          bottom: -10px;
+          border: 5px solid rgba(255,255,255,0.18);
+          border-radius: 999px;
+        }
+
+        .mc-auth-brand-copy strong {
+          display: block;
+          font-family: Manrope, sans-serif;
+          font-size: 15px;
+          font-weight: 900;
+          letter-spacing: 0.095em;
+        }
+
+        .mc-auth-brand-copy span {
+          display: block;
+          margin-top: 3px;
+          color: var(--mc-auth-muted);
+          font-size: 10.5px;
+          font-weight: 700;
+        }
+
+        .mc-auth-top-actions {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+
+        .mc-auth-badge {
+          min-height: 36px;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 7px 12px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--mc-auth-surface) 92%, transparent);
+          box-shadow: 0 8px 24px rgba(20,45,78,0.05);
+          color: var(--mc-auth-muted);
+          font-size: 11px;
+          font-weight: 800;
+          white-space: nowrap;
+        }
+
+        .mc-auth-status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: var(--mc-auth-green);
+          box-shadow: 0 0 0 4px rgba(18,138,90,0.10);
+        }
+
+        .mc-auth-theme-button {
+          width: 38px;
+          height: 38px;
+          display: grid;
+          place-items: center;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 12px;
+          background: var(--mc-auth-surface);
+          color: var(--mc-auth-text);
+          cursor: pointer;
+          font-size: 17px;
+          transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+
+        .mc-auth-theme-button:hover {
+          transform: translateY(-1px);
+          border-color: var(--mc-auth-border-strong);
+        }
+
+        .mc-auth-main {
+          flex: 1;
+          display: grid;
+          grid-template-columns: minmax(0, 1.14fr) minmax(390px, 0.86fr);
+          gap: 52px;
+          align-items: center;
+          padding: 42px 0 24px;
+        }
+
+        .mc-auth-hero {
+          max-width: 760px;
+          padding: 10px 4px;
+        }
+
+        .mc-auth-eyebrow {
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          margin-bottom: 20px;
+          color: var(--mc-auth-blue);
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+        }
+
+        .mc-auth-eyebrow-line {
+          width: 30px;
+          height: 2px;
+          border-radius: 999px;
+          background: var(--mc-auth-blue);
+        }
+
+        .mc-auth-title {
+          max-width: 760px;
+          margin: 0;
+          font-family: Manrope, sans-serif;
+          font-size: clamp(46px, 5.4vw, 72px);
+          line-height: 0.99;
+          letter-spacing: -0.055em;
+          font-weight: 800;
+        }
+
+        .mc-auth-title-accent {
+          display: block;
+          color: var(--mc-auth-blue);
+        }
+
+        .mc-auth-lead {
+          max-width: 670px;
+          margin: 22px 0 0;
+          color: var(--mc-auth-muted);
+          font-size: 15px;
+          line-height: 1.75;
+        }
+
+        .mc-auth-proof {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 9px;
+          margin-top: 22px;
+        }
+
+        .mc-auth-proof-item {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          min-height: 34px;
+          padding: 7px 11px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 999px;
+          background: var(--mc-auth-surface);
+          color: var(--mc-auth-muted);
+          font-size: 10px;
+          font-weight: 800;
+        }
+
+        .mc-auth-proof-check {
+          width: 18px;
+          height: 18px;
+          display: grid;
+          place-items: center;
+          border-radius: 999px;
+          background: var(--mc-auth-blue-soft);
+          color: var(--mc-auth-blue);
+          font-size: 10px;
+          font-weight: 900;
+        }
+
+        .mc-auth-pipeline {
+          margin-top: 28px;
+          padding: 18px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 20px;
+          background:
+            linear-gradient(180deg, color-mix(in srgb, var(--mc-auth-surface) 96%, transparent), var(--mc-auth-surface-2));
+          box-shadow: 0 16px 40px rgba(31,65,106,0.06);
+        }
+
+        .mc-auth-pipeline-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 15px;
+        }
+
+        .mc-auth-pipeline-head strong {
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.11em;
+          text-transform: uppercase;
+        }
+
+        .mc-auth-pipeline-head span {
+          color: var(--mc-auth-muted);
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .mc-auth-pipeline-row {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .mc-auth-pipeline-step {
+          min-width: 0;
+          padding: 12px 10px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 13px;
+          background: var(--mc-auth-surface);
+        }
+
+        .mc-auth-pipeline-step:first-child {
+          border-color: rgba(23,105,255,0.30);
+          background: var(--mc-auth-blue-soft);
+        }
+
+        .mc-auth-pipeline-num {
+          color: var(--mc-auth-blue);
+          font-size: 9px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+        }
+
+        .mc-auth-pipeline-step strong {
+          display: block;
+          margin-top: 5px;
+          font-size: 11px;
+          font-weight: 900;
+        }
+
+        .mc-auth-pipeline-step span {
+          display: block;
+          margin-top: 3px;
+          color: var(--mc-auth-muted);
+          font-size: 9.5px;
+          line-height: 1.35;
+        }
+
+        .mc-auth-capability-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+          margin-top: 12px;
+        }
+
+        .mc-auth-capability {
+          min-width: 0;
+          padding: 12px 13px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 13px;
+          background: var(--mc-auth-surface-2);
+        }
+
+        .mc-auth-capability strong {
+          display: block;
+          font-size: 11px;
+          font-weight: 900;
+        }
+
+        .mc-auth-capability span {
+          display: block;
+          margin-top: 4px;
+          color: var(--mc-auth-muted);
+          font-size: 9.5px;
+          line-height: 1.4;
+        }
+
+        .mc-auth-access-wrap {
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .mc-auth-access-wrap::before {
+          content: "";
+          position: absolute;
+          inset: -18px;
+          z-index: -1;
+          border-radius: 34px;
+          background: radial-gradient(circle at 50% 20%, rgba(23,105,255,0.12), transparent 65%);
+          filter: blur(2px);
+        }
+
+        .mc-auth-card {
+          width: 100%;
+          padding: 30px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 26px;
+          background:
+            linear-gradient(180deg, color-mix(in srgb, var(--mc-auth-surface) 98%, transparent), var(--mc-auth-surface));
+          box-shadow: var(--mc-auth-shadow);
+        }
+
+        .mc-auth-card-top {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 14px;
+          margin-bottom: 15px;
+        }
+
+        .mc-auth-card-kicker {
+          color: var(--mc-auth-blue);
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+        }
+
+        .mc-auth-secure {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          color: var(--mc-auth-muted);
+          font-size: 10px;
+          font-weight: 800;
+          white-space: nowrap;
+        }
+
+        .mc-auth-secure-mark {
+          width: 18px;
+          height: 18px;
+          display: grid;
+          place-items: center;
+          border-radius: 999px;
+          background: rgba(18,138,90,0.10);
+          color: var(--mc-auth-green);
+          font-size: 10px;
+          font-weight: 900;
+        }
+
+        .mc-auth-card h2 {
+          margin: 0;
+          font-family: Manrope, sans-serif;
+          font-size: 30px;
+          line-height: 1.14;
+          letter-spacing: -0.032em;
+        }
+
+        .mc-auth-card-description {
+          margin: 9px 0 20px;
+          color: var(--mc-auth-muted);
+          font-size: 12px;
+          line-height: 1.65;
+        }
+
+        .mc-auth-alert {
+          margin-bottom: 16px;
+          padding: 11px 13px;
+          border-radius: 12px;
+          border: 1px solid #efb52f;
+          background: #fff8e4;
+          color: #7f5700;
+          font-size: 11px;
+          line-height: 1.5;
+        }
+
+        .mc-auth-page[data-dark="true"] .mc-auth-alert {
+          background: #372b12;
+          color: #fde7a3;
+        }
+
+        .mc-auth-alert strong {
+          display: block;
+          margin-bottom: 3px;
+        }
+
+        .mc-auth-tabs {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 5px;
+          margin-bottom: 20px;
+          padding: 4px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 14px;
+          background: var(--mc-auth-surface-2);
+        }
+
+        .mc-auth-tab {
+          min-height: 42px;
+          padding: 9px 10px;
+          border: 0;
+          border-radius: 10px;
+          background: transparent;
+          color: var(--mc-auth-muted);
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 12px;
+          font-weight: 900;
+          transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+        }
+
+        .mc-auth-tab:hover {
+          color: var(--mc-auth-text);
+        }
+
+        .mc-auth-tab.active {
+          background: var(--mc-auth-surface);
+          color: var(--mc-auth-text);
+          box-shadow: 0 6px 18px rgba(22,45,79,0.08);
+        }
+
+        .mc-auth-field {
+          display: block;
+          margin-bottom: 14px;
+          color: var(--mc-auth-text);
+          font-size: 11px;
+          font-weight: 900;
+        }
+
+        .mc-auth-field input {
+          width: 100%;
+          min-height: 48px;
+          margin-top: 7px;
+          padding: 12px 13px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 12px;
+          background: var(--mc-auth-input);
+          color: var(--mc-auth-text);
+          outline: none;
+          font-family: inherit;
+          font-size: 13px;
+          transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+        }
+
+        .mc-auth-field input:focus {
+          border-color: rgba(23,105,255,0.70);
+          box-shadow: 0 0 0 4px rgba(23,105,255,0.10);
+          background: var(--mc-auth-surface);
+        }
+
+        .mc-auth-field input::placeholder {
+          color: var(--mc-auth-muted);
+          opacity: 0.72;
+        }
+
+        .mc-auth-primary {
+          width: 100%;
+          min-height: 48px;
+          padding: 12px 15px;
+          border: 0;
+          border-radius: 12px;
+          background:
+            linear-gradient(135deg, #2a77ff, #0b56dc 68%, #0647bb);
+          color: #ffffff;
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 13px;
+          font-weight: 900;
+          box-shadow: 0 12px 26px rgba(23,105,255,0.23);
+          transition: transform 0.16s ease, box-shadow 0.16s ease;
+        }
+
+        .mc-auth-primary:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 15px 30px rgba(23,105,255,0.28);
+        }
+
+        .mc-auth-primary:disabled {
+          transform: none;
+          box-shadow: none;
+        }
+
+        .mc-auth-divider {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin: 15px 0 10px;
+          color: var(--mc-auth-muted);
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .mc-auth-divider::before,
+        .mc-auth-divider::after {
+          content: "";
+          flex: 1;
+          height: 1px;
+          background: var(--mc-auth-border);
+        }
+
+        .mc-auth-demo {
+          width: 100%;
+          min-height: 44px;
+          padding: 11px 14px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 12px;
+          background: var(--mc-auth-surface-2);
+          color: var(--mc-auth-text);
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 12px;
+          font-weight: 900;
+          transition: border-color 0.16s ease, background 0.16s ease;
+        }
+
+        .mc-auth-demo:hover {
+          border-color: var(--mc-auth-border-strong);
+          background: var(--mc-auth-surface-3);
+        }
+
+        .mc-auth-demo-note {
+          margin: 8px 0 0;
+          color: var(--mc-auth-muted);
+          font-size: 9.5px;
+          line-height: 1.45;
+          text-align: center;
+        }
+
+        .mc-auth-password-error {
+          margin: -2px 0 12px;
+          color: #dc2626;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .mc-auth-registry-note {
+          margin-top: 16px;
+          padding-top: 15px;
+          border-top: 1px solid var(--mc-auth-border);
+        }
+
+        .mc-auth-registry-note details {
+          color: var(--mc-auth-muted);
+          font-size: 10px;
+          line-height: 1.55;
+        }
+
+        .mc-auth-registry-note summary {
+          cursor: pointer;
+          color: var(--mc-auth-text);
+          font-size: 11px;
+          font-weight: 900;
+        }
+
+        .mc-auth-registry-list {
+          margin-top: 9px;
+          padding: 10px;
+          border-radius: 10px;
+          background: var(--mc-auth-surface-2);
+          word-break: break-word;
+        }
+
+        .mc-auth-trust-card {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px;
+          padding: 12px;
+          border: 1px solid var(--mc-auth-border);
+          border-radius: 16px;
+          background: color-mix(in srgb, var(--mc-auth-surface) 90%, transparent);
+        }
+
+        .mc-auth-trust-item {
+          min-width: 0;
+          padding: 7px 8px;
+          border-radius: 10px;
+          background: var(--mc-auth-surface-2);
+        }
+
+        .mc-auth-trust-item strong {
+          display: block;
+          font-size: 9.5px;
+          font-weight: 900;
+        }
+
+        .mc-auth-trust-item span {
+          display: block;
+          margin-top: 3px;
+          color: var(--mc-auth-muted);
+          font-size: 8.5px;
+          line-height: 1.35;
+        }
+
+        .mc-auth-footer {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 18px;
+          margin-top: 14px;
+          padding: 16px 2px 2px;
+          color: var(--mc-auth-muted);
+          font-size: 9.5px;
+          line-height: 1.45;
+        }
+
+        .mc-auth-footer strong {
+          color: var(--mc-auth-text);
+        }
+
+        .mc-auth-toast {
+          position: fixed;
+          left: 50%;
+          bottom: 22px;
+          transform: translateX(-50%);
+          max-width: calc(100% - 32px);
+          padding: 11px 15px;
+          border-radius: 12px;
+          background: #172033;
+          color: #ffffff;
+          box-shadow: 0 12px 35px rgba(0,0,0,0.20);
+          font-size: 12px;
+          font-weight: 800;
+          z-index: 3000;
+        }
+
+        @media (max-width: 980px) {
+          .mc-auth-main {
+            grid-template-columns: 1fr;
+            gap: 30px;
+            align-items: stretch;
+            padding-top: 30px;
+          }
+
+          .mc-auth-hero {
+            max-width: 850px;
+          }
+
+          .mc-auth-title {
+            max-width: 830px;
+            font-size: clamp(44px, 8vw, 68px);
+          }
+
+          .mc-auth-access-wrap {
+            width: min(680px, 100%);
+            margin: 0 auto;
+          }
+        }
+
+        @media (max-width: 700px) {
+          .mc-auth-page {
+            padding: 16px;
+          }
+
+          .mc-auth-shell {
+            min-height: calc(100vh - 32px);
+          }
+
+          .mc-auth-topbar {
+            min-height: 50px;
+          }
+
+          .mc-auth-badge {
+            display: none;
+          }
+
+          .mc-auth-brand-copy span {
+            display: none;
+          }
+
+          .mc-auth-main {
+            padding-top: 24px;
+          }
+
+          .mc-auth-title {
+            font-size: clamp(38px, 12vw, 54px);
+            line-height: 1.01;
+          }
+
+          .mc-auth-lead {
+            font-size: 14px;
+            margin-top: 17px;
+          }
+
+          .mc-auth-proof {
+            margin-top: 18px;
+          }
+
+          .mc-auth-pipeline {
+            padding: 14px;
+            border-radius: 17px;
+          }
+
+          .mc-auth-pipeline-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .mc-auth-pipeline-step:last-child {
+            grid-column: 1 / -1;
+          }
+
+          .mc-auth-capability-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .mc-auth-card {
+            padding: 22px;
+            border-radius: 21px;
+          }
+
+          .mc-auth-card h2 {
+            font-size: 26px;
+          }
+
+          .mc-auth-trust-card {
+            grid-template-columns: 1fr;
+          }
+
+          .mc-auth-footer {
+            display: block;
+            margin-top: 18px;
+          }
+
+          .mc-auth-footer span:last-child {
+            display: block;
+            margin-top: 5px;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .mc-auth-page {
+            padding: 12px;
+          }
+
+          .mc-auth-brand-mark {
+            width: 40px;
+            height: 40px;
+          }
+
+          .mc-auth-title {
+            font-size: 36px;
+          }
+
+          .mc-auth-proof-item {
+            width: 100%;
+          }
+
+          .mc-auth-pipeline-head {
+            display: block;
+          }
+
+          .mc-auth-pipeline-head span {
+            display: block;
+            margin-top: 4px;
+          }
+
+          .mc-auth-card {
+            padding: 18px;
+          }
+
+          .mc-auth-card-top {
+            display: block;
+          }
+
+          .mc-auth-secure {
+            margin-top: 7px;
+          }
+
+          .mc-auth-tabs {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
+
+      <div className="mc-auth-shell">
+        <header className="mc-auth-topbar">
+          <div className="mc-auth-brand">
+            <div className="mc-auth-brand-mark">MC</div>
+            <div className="mc-auth-brand-copy">
+              <strong>METROCHECK</strong>
+              <span>Legal Metrology Digital Inspection Platform</span>
+            </div>
+          </div>
+
+          <div className="mc-auth-top-actions">
+            <div className="mc-auth-badge">
+              <span className="mc-auth-status-dot" />
+              {props.cloudReady ? "Cloud connected" : "Secure workspace"}
             </div>
 
             <button
               type="button"
+              className="mc-auth-theme-button"
               onClick={props.onToggleDarkMode}
               title="Toggle theme"
-              style={{
-                border: "1px solid " + border,
-                borderRadius: "11px",
-                background: softBackground,
-                color: text,
-                cursor: "pointer",
-                padding: "10px 12px",
-                fontWeight: 800,
-              }}
+              aria-label="Toggle MetroCheck theme"
             >
               {darkMode ? "☀" : "☾"}
             </button>
           </div>
+        </header>
 
-          <div
-            style={{
-              padding: "14px 15px",
-              borderRadius: "14px",
-              background: softBackground,
-              border: "1px solid " + border,
-              marginBottom: "20px",
-            }}
-          >
-            <strong style={{ display: "block", fontSize: "14px" }}>
-              Government-registered access
-            </strong>
-            <p
-              style={{
-                margin: "6px 0 0",
-                color: muted,
-                fontSize: "12px",
-                lineHeight: 1.55,
-              }}
-            >
-              MetroCheck does not let inspectors create arbitrary identities.
-              First-time registration verifies the inspector against the
-              department registry before the account is activated.
-            </p>
-          </div>
-
-          {!props.cloudReady && props.cloudError && (
-            <div
-              role="alert"
-              style={{
-                marginBottom: "16px",
-                padding: "12px 14px",
-                borderRadius: "12px",
-                border: "1px solid #f0b429",
-                background: darkMode ? "#3a2b0d" : "#fff8e1",
-                color: darkMode ? "#fde68a" : "#8a5a00",
-                fontSize: "12px",
-                lineHeight: 1.55,
-              }}
-            >
-              <strong style={{ display: "block", marginBottom: "4px" }}>
-                Cloud connection needs attention
-              </strong>
-              {props.cloudError}
+        <main className="mc-auth-main">
+          <section className="mc-auth-hero">
+            <div className="mc-auth-eyebrow">
+              <span className="mc-auth-eyebrow-line" />
+              Legal Metrology · Digital Compliance
             </div>
-          )}
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "8px",
-              marginBottom: "20px",
-            }}
-          >
-            <button
-              type="button"
-              onClick={function () { setMode("login"); }}
-              style={{
-                padding: "11px",
-                borderRadius: "11px",
-                border: "1px solid " + border,
-                background: mode === "login" ? "#2563eb" : softBackground,
-                color: mode === "login" ? "#ffffff" : text,
-                cursor: "pointer",
-                fontWeight: 800,
-              }}
+            <h1 className="mc-auth-title">
+              Inspect smarter.
+              <br />
+              Verify faster.
+              <span className="mc-auth-title-accent"> Report with confidence.</span>
+            </h1>
+
+            <p className="mc-auth-lead">
+              MetroCheck turns packaged-commodity inspection into one connected
+              workflow — capture the label, extract declarations with OCR,
+              screen compliance rules, preserve evidence and generate an
+              inspector-ready report.
+            </p>
+
+            <div className="mc-auth-proof">
+              {[
+                "Browser-based camera & upload",
+                "Inspector-controlled decisions",
+                "Private cloud inspection history",
+              ].map(function (item) {
+                return (
+                  <div className="mc-auth-proof-item" key={item}>
+                    <span className="mc-auth-proof-check">✓</span>
+                    <span>{item}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mc-auth-pipeline">
+              <div className="mc-auth-pipeline-head">
+                <strong>Inspection pipeline</strong>
+                <span>One workspace · five connected stages</span>
+              </div>
+
+              <div className="mc-auth-pipeline-row">
+                {[
+                  ["01", "Capture", "Front + back label"],
+                  ["02", "Extract", "OCR declarations"],
+                  ["03", "Screen", "Rule engine"],
+                  ["04", "Verify", "Inspector evidence"],
+                  ["05", "Report", "PDF + history"],
+                ].map(function (item) {
+                  return (
+                    <div className="mc-auth-pipeline-step" key={item[0]}>
+                      <div className="mc-auth-pipeline-num">{item[0]}</div>
+                      <strong>{item[1]}</strong>
+                      <span>{item[2]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mc-auth-capability-grid">
+                <div className="mc-auth-capability">
+                  <strong>OCR-assisted extraction</strong>
+                  <span>Reads visible package declarations from captured labels.</span>
+                </div>
+                <div className="mc-auth-capability">
+                  <strong>Compliance screening</strong>
+                  <span>Maps extracted declarations to configurable rule checks.</span>
+                </div>
+                <div className="mc-auth-capability">
+                  <strong>Evidence-ready records</strong>
+                  <span>Stores inspection data, photos and reports in one workspace.</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div className="mc-auth-access-wrap">
+            <section
+              className="mc-auth-card"
+              aria-label="MetroCheck inspector access"
             >
-              Sign in
-            </button>
-            <button
-              type="button"
-              onClick={function () { setMode("register"); }}
-              style={{
-                padding: "11px",
-                borderRadius: "11px",
-                border: "1px solid " + border,
-                background: mode === "register" ? "#2563eb" : softBackground,
-                color: mode === "register" ? "#ffffff" : text,
-                cursor: "pointer",
-                fontWeight: 800,
-              }}
-            >
-              First-time sign up
-            </button>
-          </div>
+              <div className="mc-auth-card-top">
+                <div>
+                  <div className="mc-auth-card-kicker">Inspector access</div>
+                </div>
 
-          {mode === "login" ? (
-            <form onSubmit={submitLogin}>
-              <label style={{ display: "block", marginBottom: "14px", fontSize: "13px", fontWeight: 800 }}>
-                Official email
-                <input
-                  type="email"
-                  value={email}
-                  onChange={function (event) { setEmail(event.target.value); }}
-                  placeholder="official@department.gov.in"
-                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
-                  required
-                />
-              </label>
+                <div className="mc-auth-secure">
+                  <span className="mc-auth-secure-mark">✓</span>
+                  Verified identity workflow
+                </div>
+              </div>
 
-              <label style={{ display: "block", marginBottom: "16px", fontSize: "13px", fontWeight: 800 }}>
-                Password
-                <input
-                  type="password"
-                  value={password}
-                  onChange={function (event) { setPassword(event.target.value); }}
-                  placeholder="Enter your MetroCheck password"
-                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
-                  required
-                />
-              </label>
+              <h2>
+                {mode === "login"
+                  ? "Welcome back."
+                  : "Activate inspector access."}
+              </h2>
 
-              <button type="submit" style={primaryButtonStyle}>
-                Sign in to MetroCheck
-              </button>
-
-              <button
-                type="button"
-                onClick={props.onDemoLogin}
-                style={{
-                  width: "100%",
-                  padding: "12px 16px",
-                  marginTop: "10px",
-                  borderRadius: "12px",
-                  border: "1px solid " + border,
-                  background: softBackground,
-                  color: text,
-                  cursor: "pointer",
-                  fontWeight: 800,
-                  fontSize: "14px",
-                }}
-              >
-                Enter Demo Inspector
-              </button>
-
-              <p
-                style={{
-                  margin: "10px 0 0",
-                  color: muted,
-                  fontSize: "11px",
-                  lineHeight: 1.45,
-                  textAlign: "center",
-                }}
-              >
-                SIH demo access — no real government credentials required.
+              <p className="mc-auth-card-description">
+                {mode === "login"
+                  ? "Sign in with the official email linked to your MetroCheck inspector account."
+                  : "First-time access verifies your Inspector ID and registered department email before account activation."}
               </p>
-            </form>
-          ) : (
-            <form onSubmit={submitRegistration}>
-              <label style={{ display: "block", marginBottom: "14px", fontSize: "13px", fontWeight: 800 }}>
-                Government Inspector ID
-                <input
-                  type="text"
-                  value={inspectorId}
-                  onChange={function (event) { setInspectorId(event.target.value); }}
-                  placeholder="e.g. INS-001"
-                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
-                  required
-                />
-              </label>
 
-              <label style={{ display: "block", marginBottom: "14px", fontSize: "13px", fontWeight: 800 }}>
-                Registered official email
-                <input
-                  type="email"
-                  value={email}
-                  onChange={function (event) { setEmail(event.target.value); }}
-                  placeholder="Use the email registered with the department"
-                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
-                  required
-                />
-              </label>
-
-              <label style={{ display: "block", marginBottom: "14px", fontSize: "13px", fontWeight: 800 }}>
-                Create password
-                <input
-                  type="password"
-                  value={password}
-                  onChange={function (event) { setPassword(event.target.value); }}
-                  placeholder="At least 6 characters"
-                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
-                  required
-                />
-              </label>
-
-              <label style={{ display: "block", marginBottom: "16px", fontSize: "13px", fontWeight: 800 }}>
-                Confirm password
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={function (event) { setConfirmPassword(event.target.value); }}
-                  placeholder="Re-enter password"
-                  style={Object.assign({}, fieldStyle, { marginTop: "7px" })}
-                  required
-                />
-              </label>
-
-              {confirmPassword && password !== confirmPassword && (
-                <div style={{ color: "#dc2626", fontSize: "12px", marginBottom: "12px" }}>
-                  Passwords do not match.
+              {!props.cloudReady && props.cloudError && (
+                <div className="mc-auth-alert" role="alert">
+                  <strong>Cloud connection needs attention</strong>
+                  {props.cloudError}
                 </div>
               )}
 
-              <button type="submit" style={primaryButtonStyle}>
-                Verify & create account
-              </button>
-            </form>
-          )}
-        </section>
-
-        <section
-          style={{
-            background: surface,
-            border: "1px solid " + border,
-            borderRadius: "22px",
-            padding: "28px",
-            boxShadow: "0 20px 60px rgba(0, 0, 0, 0.06)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "11px",
-              fontWeight: 900,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              color: muted,
-              marginBottom: "10px",
-            }}
-          >
-            How access works
-          </div>
-
-          <h2 style={{ margin: "0 0 18px", fontSize: "22px" }}>
-            Registered first. Account second.
-          </h2>
-
-          <div style={{ display: "grid", gap: "12px" }}>
-            {[
-              ["01", "Department registration", "The inspector already exists in the government registry."],
-              ["02", "Identity verification", "MetroCheck matches the submitted Inspector ID and registered official email."],
-              ["03", "Account activation", "The verified inspector creates a MetroCheck login for future sign-ins."],
-              ["04", "Private workspace", "Inspection history, reports and profile information are tied to that inspector ID."],
-            ].map(function (item) {
-              return (
-                <div
-                  key={item[0]}
-                  style={{
-                    display: "flex",
-                    gap: "12px",
-                    padding: "13px",
-                    borderRadius: "13px",
-                    background: softBackground,
-                    border: "1px solid " + border,
+              <div
+                className="mc-auth-tabs"
+                role="tablist"
+                aria-label="Inspector access mode"
+              >
+                <button
+                  type="button"
+                  className={
+                    "mc-auth-tab" +
+                    (mode === "login" ? " active" : "")
+                  }
+                  onClick={function () {
+                    setMode("login");
                   }}
+                  role="tab"
+                  aria-selected={mode === "login"}
                 >
-                  <div style={{ fontWeight: 900, color: "#2563eb" }}>
-                    {item[0]}
-                  </div>
-                  <div>
-                    <strong style={{ display: "block", fontSize: "13px" }}>
-                      {item[1]}
-                    </strong>
-                    <span style={{ display: "block", marginTop: "3px", color: muted, fontSize: "12px", lineHeight: 1.5 }}>
-                      {item[2]}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                  Sign in
+                </button>
 
-          <div
-            style={{
-              marginTop: "18px",
-              padding: "14px",
-              borderRadius: "14px",
-              border: "1px dashed " + border,
-              color: muted,
-              fontSize: "11px",
-              lineHeight: 1.55,
-            }}
-          >
-            SIH prototype note: the government registry is mocked locally for
-            demonstration. A production deployment would verify identities
-            against the department's authenticated backend and database.
-          </div>
+                <button
+                  type="button"
+                  className={
+                    "mc-auth-tab" +
+                    (mode === "register" ? " active" : "")
+                  }
+                  onClick={function () {
+                    setMode("register");
+                  }}
+                  role="tab"
+                  aria-selected={mode === "register"}
+                >
+                  First-time registration
+                </button>
+              </div>
 
-          <div
-            style={{
-              marginTop: "14px",
-              padding: "14px",
-              borderRadius: "14px",
-              background: darkMode ? "#172033" : "#eff6ff",
-              border: "1px solid " + border,
-              fontSize: "12px",
-              lineHeight: 1.5,
-            }}
-          >
-            <strong>Demo registry IDs:</strong>
-            <div style={{ marginTop: "6px", color: muted }}>
-              INS-001 · inspector@demo.metrology.gov.in<br />
-              INS-002 · priya.sharma@demo.metrology.gov.in<br />
-              INS-003 · ravi.kumar@demo.metrology.gov.in
+              {mode === "login" ? (
+                <form onSubmit={submitLogin}>
+                  <label className="mc-auth-field">
+                    Official email
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={function (event) {
+                        setEmail(event.target.value);
+                      }}
+                      placeholder="official@department.gov.in"
+                      autoComplete="email"
+                      required
+                    />
+                  </label>
+
+                  <label className="mc-auth-field">
+                    Password
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={function (event) {
+                        setPassword(event.target.value);
+                      }}
+                      placeholder="Enter your MetroCheck password"
+                      autoComplete="current-password"
+                      required
+                    />
+                  </label>
+
+                  <button type="submit" className="mc-auth-primary">
+                    Enter inspector workspace
+                  </button>
+
+                  <div className="mc-auth-divider">Demo access</div>
+
+                  <button
+                    type="button"
+                    className="mc-auth-demo"
+                    onClick={props.onDemoLogin}
+                  >
+                    Try with demo inspector
+                  </button>
+
+                  <p className="mc-auth-demo-note">
+                    Demonstration access only. No real government credentials required.
+                  </p>
+                </form>
+              ) : (
+                <form onSubmit={submitRegistration}>
+                  <label className="mc-auth-field">
+                    Government Inspector ID
+                    <input
+                      type="text"
+                      value={inspectorId}
+                      onChange={function (event) {
+                        setInspectorId(event.target.value);
+                      }}
+                      placeholder="e.g. INS-001"
+                      autoComplete="off"
+                      required
+                    />
+                  </label>
+
+                  <label className="mc-auth-field">
+                    Registered official email
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={function (event) {
+                        setEmail(event.target.value);
+                      }}
+                      placeholder="Email registered with the department"
+                      autoComplete="email"
+                      required
+                    />
+                  </label>
+
+                  <label className="mc-auth-field">
+                    Create password
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={function (event) {
+                        setPassword(event.target.value);
+                      }}
+                      placeholder="At least 6 characters"
+                      autoComplete="new-password"
+                      minLength={6}
+                      required
+                    />
+                  </label>
+
+                  <label className="mc-auth-field">
+                    Confirm password
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={function (event) {
+                        setConfirmPassword(event.target.value);
+                      }}
+                      placeholder="Re-enter password"
+                      autoComplete="new-password"
+                      minLength={6}
+                      required
+                    />
+                  </label>
+
+                  {confirmPassword && password !== confirmPassword && (
+                    <div className="mc-auth-password-error">
+                      Passwords do not match.
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="mc-auth-primary"
+                    disabled={Boolean(
+                      confirmPassword && password !== confirmPassword
+                    )}
+                    style={
+                      confirmPassword && password !== confirmPassword
+                        ? { opacity: 0.55, cursor: "not-allowed" }
+                        : undefined
+                    }
+                  >
+                    Verify & create account
+                  </button>
+                </form>
+              )}
+
+              <div className="mc-auth-registry-note">
+                <details>
+                  <summary>Demo inspector credentials</summary>
+                  <div className="mc-auth-registry-list">
+                    INS-001 · inspector@demo.metrology.gov.in
+                    <br />
+                    INS-002 · priya.sharma@demo.metrology.gov.in
+                    <br />
+                    INS-003 · ravi.kumar@demo.metrology.gov.in
+                  </div>
+                </details>
+              </div>
+            </section>
+
+            <div className="mc-auth-trust-card">
+              <div className="mc-auth-trust-item">
+                <strong>Cloud-backed</strong>
+                <span>Supabase authentication, database and private file storage.</span>
+              </div>
+              <div className="mc-auth-trust-item">
+                <strong>Inspector-first</strong>
+                <span>Automation supports review; it does not replace field judgment.</span>
+              </div>
+              <div className="mc-auth-trust-item">
+                <strong>Evidence-aware</strong>
+                <span>Package photos, OCR output and reports stay tied to the inspection.</span>
+              </div>
             </div>
           </div>
-        </section>
+        </main>
+
+        <footer className="mc-auth-footer">
+          <span>
+            <strong>MetroCheck</strong> · Digital decision support for packaged commodity inspection.
+          </span>
+          <span>
+            OCR-assisted screening · Inspector-verified enforcement decisions
+          </span>
+        </footer>
       </div>
 
       {props.toast && (
-        <div
-          style={{
-            position: "fixed",
-            left: "50%",
-            bottom: "22px",
-            transform: "translateX(-50%)",
-            padding: "11px 15px",
-            borderRadius: "12px",
-            background: darkMode ? "#1f2937" : "#172033",
-            color: "#ffffff",
-            boxShadow: "0 12px 35px rgba(0,0,0,0.2)",
-            fontSize: "13px",
-            fontWeight: 700,
-            zIndex: 3000,
-            maxWidth: "calc(100% - 32px)",
-          }}
-        >
-          {props.toast}
-        </div>
+        <div className="mc-auth-toast">{props.toast}</div>
       )}
     </div>
   );
