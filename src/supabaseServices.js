@@ -12,13 +12,11 @@ function requireSupabase() {
 }
 
 function sanitizeFileName(name) {
-  return (
-    String(name || "file")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 120) || "file"
-  );
+  return String(name || "file")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || "file";
 }
 
 function serializableRecord(record) {
@@ -45,6 +43,7 @@ function mapProfile(row) {
     email: String(row.email || "").toLowerCase(),
     department: row.department || "Legal Metrology Department",
     office: row.office || "",
+    role: String(row.role || "INSPECTOR").toUpperCase(),
     verified: Boolean(row.verified),
     verifiedAt: row.verified_at
       ? Date.parse(row.verified_at) || Date.now()
@@ -62,16 +61,20 @@ function getStorageMetadata(record) {
     storage.package && typeof storage.package === "object"
       ? storage.package
       : {};
+  var packagePaths = {};
+
+  Object.keys(packageStorage).forEach(function (key) {
+    if (packageStorage[key]) {
+      packagePaths[key] = String(packageStorage[key]);
+    }
+  });
 
   return {
-    front: String(packageStorage.front || ""),
-    back: String(packageStorage.back || ""),
+    package: packagePaths,
     evidence: Array.isArray(source.evidence)
       ? source.evidence
           .map(function (item) {
-            return item && item.storagePath
-              ? String(item.storagePath)
-              : "";
+            return item && item.storagePath ? String(item.storagePath) : "";
           })
           .filter(Boolean)
       : [],
@@ -81,7 +84,10 @@ function getStorageMetadata(record) {
 function collectStoragePaths(record) {
   var storage = getStorageMetadata(record);
 
-  return [storage.front, storage.back]
+  return Object.keys(storage.package || {})
+    .map(function (key) {
+      return storage.package[key];
+    })
     .concat(storage.evidence)
     .filter(Boolean);
 }
@@ -108,10 +114,9 @@ async function createSignedUrlMap(paths) {
   }
 
   (response.data || []).forEach(function (item, index) {
-    var path =
-      item && item.path
-        ? item.path
-        : uniquePaths[index];
+    var path = item && item.path
+      ? item.path
+      : uniquePaths[index];
 
     var signedUrl =
       item && (item.signedUrl || item.signedURL)
@@ -129,14 +134,15 @@ async function createSignedUrlMap(paths) {
 function materializeRecord(record, signedUrlMap) {
   var source = serializableRecord(record || {});
   var storage = getStorageMetadata(source);
+  var packageImages = {};
 
-  var frontUrl = storage.front
-    ? signedUrlMap.get(storage.front) || ""
-    : "";
+  Object.keys(storage.package || {}).forEach(function (key) {
+    var path = storage.package[key];
 
-  var backUrl = storage.back
-    ? signedUrlMap.get(storage.back) || ""
-    : "";
+    packageImages[key] = path
+      ? signedUrlMap.get(path) || ""
+      : "";
+  });
 
   var evidence = Array.isArray(source.evidence)
     ? source.evidence.map(function (item) {
@@ -146,17 +152,26 @@ function materializeRecord(record, signedUrlMap) {
 
         return Object.assign({}, item, {
           url:
-            signedUrlMap.get(String(item.storagePath)) || "",
+            signedUrlMap.get(
+              String(item.storagePath)
+            ) || "",
         });
       })
     : [];
 
+  var preview =
+    packageImages.front ||
+    packageImages.back ||
+    Object.keys(packageImages)
+      .map(function (key) {
+        return packageImages[key];
+      })
+      .find(Boolean) ||
+    "";
+
   return Object.assign({}, source, {
-    imagePreview: frontUrl || backUrl || "",
-    packageImages: {
-      front: frontUrl,
-      back: backUrl,
-    },
+    imagePreview: preview,
+    packageImages: packageImages,
     evidence: evidence,
   });
 }
@@ -245,6 +260,7 @@ export function observeAuthSession(callback) {
           "MetroCheck Supabase getSession failed:",
           error
         );
+
         emit(null);
       });
   } catch (error) {
@@ -252,6 +268,7 @@ export function observeAuthSession(callback) {
       "MetroCheck Supabase session restore failed:",
       error
     );
+
     emit(null);
   }
 
@@ -267,6 +284,7 @@ export function observeAuthSession(callback) {
       "MetroCheck Supabase auth listener failed:",
       error
     );
+
     emit(null);
   }
 
@@ -291,7 +309,7 @@ async function fetchInspectorProfile(uid) {
   var response = await supabase
     .from("inspectors")
     .select(
-      "user_id, inspector_id, name, email, department, office, verified, verified_at"
+      "user_id, inspector_id, name, email, department, office, role, verified, verified_at"
     )
     .eq("user_id", uid)
     .maybeSingle();
@@ -439,7 +457,6 @@ export async function loginInspectorWithSupabase(
       email: String(email || "")
         .trim()
         .toLowerCase(),
-
       password: String(password || ""),
     });
 
@@ -609,6 +626,7 @@ async function uploadEvidenceFiles(
       result.push(
         serializableRecord(item)
       );
+
       continue;
     }
 
@@ -632,7 +650,6 @@ async function uploadEvidenceFiles(
           item.file.type ||
           item.type ||
           "application/octet-stream",
-
         cacheControl: "3600",
         upsert: true,
       });
@@ -646,21 +663,17 @@ async function uploadEvidenceFiles(
       name:
         item.name ||
         item.file.name,
-
       size:
         item.size ||
         item.file.size ||
         0,
-
       type:
         item.type ||
         item.file.type ||
         "",
-
       addedAt:
         item.addedAt ||
         Date.now(),
-
       storagePath: objectPath,
     });
   }
@@ -676,122 +689,175 @@ export async function saveCloudInspection(
 ) {
   requireSupabase();
 
-  var inspectionId = String(record.id);
+  var inspectionId =
+    String(record.id);
 
-  var previousResponse = await supabase
-    .from("inspections")
-    .select("record")
-    .eq("id", inspectionId)
-    .maybeSingle();
+  var previousResponse =
+    await supabase
+      .from("inspections")
+      .select("record")
+      .eq("id", inspectionId)
+      .maybeSingle();
 
   if (previousResponse.error) {
     throw previousResponse.error;
   }
 
-  var previousRecord = previousResponse.data
-    ? previousResponse.data.record
-    : null;
+  var previousRecord =
+    previousResponse.data
+      ? previousResponse.data.record
+      : null;
 
   var previousStorage =
-    getStorageMetadata(previousRecord);
+    getStorageMetadata(
+      previousRecord
+    );
 
-  var uploadResults = await Promise.all([
-    uploadPackageImage(
-      uid,
-      inspectionId,
-      "front",
-      packageImages &&
-        packageImages.front,
-      previousStorage.front
-    ),
+  var panelKeys = Array.from(
+    new Set(
+      Object.keys(
+        packageImages || {}
+      ).concat(
+        Object.keys(
+          previousStorage.package || {}
+        )
+      )
+    )
+  );
 
-    uploadPackageImage(
-      uid,
-      inspectionId,
-      "back",
-      packageImages &&
-        packageImages.back,
-      previousStorage.back
-    ),
+  var panelUploads =
+    await Promise.all(
+      panelKeys.map(
+        function (side) {
+          return uploadPackageImage(
+            uid,
+            inspectionId,
+            side,
+            packageImages &&
+              packageImages[side],
+            previousStorage.package &&
+              previousStorage.package[
+                side
+              ]
+          );
+        }
+      )
+    );
 
-    uploadEvidenceFiles(
+  var packagePaths = {};
+
+  panelKeys.forEach(
+    function (side, index) {
+      if (panelUploads[index]) {
+        packagePaths[side] =
+          panelUploads[index];
+      }
+    }
+  );
+
+  var uploadedEvidence =
+    await uploadEvidenceFiles(
       uid,
       inspectionId,
       evidence
-    ),
-  ]);
-
-  var frontPath = uploadResults[0];
-  var backPath = uploadResults[1];
-  var uploadedEvidence = uploadResults[2];
+    );
 
   var stableRecord =
     serializableRecord(
-      Object.assign({}, record, {
-        ownerUid: uid,
-        ownerId: record.ownerId || "",
-        imagePreview: "",
+      Object.assign(
+        {},
+        record,
+        {
+          ownerUid: uid,
 
-        packageImages: {
-          front: "",
-          back: "",
-        },
+          ownerId:
+            record.ownerId ||
+            "",
 
-        evidence:
-          uploadedEvidence.map(
-            function (item) {
-              var copy =
-                Object.assign(
-                  {},
-                  item
-                );
+          imagePreview: "",
 
-              delete copy.url;
+          packageImages:
+            Object.keys(
+              packagePaths
+            ).reduce(
+              function (
+                result,
+                key
+              ) {
+                result[key] =
+                  "";
 
-              return copy;
-            }
-          ),
+                return result;
+              },
+              {}
+            ),
 
-        _storage: {
-          provider: "supabase",
-          bucket: STORAGE_BUCKET,
+          evidence:
+            uploadedEvidence.map(
+              function (item) {
+                var copy =
+                  Object.assign(
+                    {},
+                    item
+                  );
 
-          package: {
-            front: frontPath,
-            back: backPath,
+                delete copy.url;
+
+                return copy;
+              }
+            ),
+
+          _storage: {
+            provider:
+              "supabase",
+
+            bucket:
+              STORAGE_BUCKET,
+
+            package:
+              packagePaths,
           },
+
+          cloudUpdatedAt:
+            Date.now(),
+        }
+      )
+    );
+
+  var saveResponse =
+    await supabase
+      .from("inspections")
+      .upsert(
+        {
+          id:
+            inspectionId,
+
+          owner_uid:
+            uid,
+
+          owner_id:
+            String(
+              record.ownerId ||
+                ""
+            ),
+
+          timestamp:
+            Number(
+              record.timestamp ||
+                Date.now()
+            ),
+
+          record:
+            stableRecord,
+
+          updated_at:
+            new Date()
+              .toISOString(),
         },
-
-        cloudUpdatedAt:
-          Date.now(),
-      })
-    );
-
-  var saveResponse = await supabase
-    .from("inspections")
-    .upsert(
-      {
-        id: inspectionId,
-        owner_uid: uid,
-
-        owner_id: String(
-          record.ownerId || ""
-        ),
-
-        timestamp: Number(
-          record.timestamp ||
-            Date.now()
-        ),
-
-        record: stableRecord,
-
-        updated_at:
-          new Date().toISOString(),
-      },
-      {
-        onConflict: "id",
-      }
-    );
+        {
+          onConflict: "id",
+        }
+      );
 
   if (saveResponse.error) {
     throw saveResponse.error;
@@ -807,9 +873,13 @@ export async function saveCloudInspection(
   var orphanedPaths =
     collectStoragePaths(
       previousRecord
-    ).filter(function (path) {
-      return !currentPaths.has(path);
-    });
+    ).filter(
+      function (path) {
+        return !currentPaths.has(
+          path
+        );
+      }
+    );
 
   if (orphanedPaths.length) {
     var cleanupResponse =
@@ -838,7 +908,9 @@ export async function saveCloudInspection(
   );
 }
 
-export async function loadCloudHistory(uid) {
+export async function loadCloudHistory(
+  uid
+) {
   requireSupabase();
 
   var response = await supabase
@@ -846,24 +918,33 @@ export async function loadCloudHistory(uid) {
     .select(
       "id, record, timestamp"
     )
-    .eq("owner_uid", uid)
-    .order("timestamp", {
-      ascending: false,
-    });
+    .eq(
+      "owner_uid",
+      uid
+    )
+    .order(
+      "timestamp",
+      {
+        ascending: false,
+      }
+    );
 
   if (response.error) {
     throw response.error;
   }
 
-  var rows = response.data || [];
+  var rows =
+    response.data || [];
+
   var paths = [];
 
   rows.forEach(function (row) {
-    paths = paths.concat(
-      collectStoragePaths(
-        row.record
-      )
-    );
+    paths =
+      paths.concat(
+        collectStoragePaths(
+          row.record
+        )
+      );
   });
 
   var signedUrlMap =
@@ -887,6 +968,74 @@ export async function loadCloudHistory(uid) {
   );
 }
 
+export async function loadSupervisorHistory(
+  uid
+) {
+  requireSupabase();
+
+  var profile =
+    await fetchInspectorProfile(
+      uid
+    );
+
+  if (
+    !profile ||
+    (
+      profile.role !==
+        "SUPERVISOR" &&
+      profile.role !==
+        "ADMIN"
+    )
+  ) {
+    throw new Error(
+      "Supervisor access is required."
+    );
+  }
+
+  var response =
+    await supabase
+      .from("inspections")
+      .select(
+        "id, record, timestamp"
+      )
+      .order(
+        "timestamp",
+        {
+          ascending: false,
+        }
+      );
+
+  if (response.error) {
+    throw response.error;
+  }
+
+  var rows =
+    response.data || [];
+
+  /*
+   * Supervisor overview is metadata-first.
+   * Private package/evidence files remain
+   * owner-scoped under Storage RLS.
+   */
+  var emptySignedUrlMap =
+    new Map();
+
+  return rows.map(
+    function (row) {
+      return materializeRecord(
+        Object.assign(
+          {},
+          row.record || {},
+          {
+            id: row.id,
+          }
+        ),
+        emptySignedUrlMap
+      );
+    }
+  );
+}
+
 export async function deleteCloudInspection(
   inspectionId,
   uid
@@ -899,9 +1048,14 @@ export async function deleteCloudInspection(
       .select("record")
       .eq(
         "id",
-        String(inspectionId)
+        String(
+          inspectionId
+        )
       )
-      .eq("owner_uid", uid)
+      .eq(
+        "owner_uid",
+        uid
+      )
       .maybeSingle();
 
   if (lookupResponse.error) {
@@ -919,7 +1073,9 @@ export async function deleteCloudInspection(
     var storageResponse =
       await supabase.storage
         .from(STORAGE_BUCKET)
-        .remove(storagePaths);
+        .remove(
+          storagePaths
+        );
 
     if (storageResponse.error) {
       console.warn(
@@ -935,37 +1091,54 @@ export async function deleteCloudInspection(
       .delete()
       .eq(
         "id",
-        String(inspectionId)
+        String(
+          inspectionId
+        )
       )
-      .eq("owner_uid", uid);
+      .eq(
+        "owner_uid",
+        uid
+      );
 
   if (deleteResponse.error) {
     throw deleteResponse.error;
   }
 }
 
-export async function clearCloudHistory(uid) {
+export async function clearCloudHistory(
+  uid
+) {
   requireSupabase();
 
   var response = await supabase
     .from("inspections")
-    .select("id, record")
-    .eq("owner_uid", uid);
+    .select(
+      "id, record"
+    )
+    .eq(
+      "owner_uid",
+      uid
+    );
 
   if (response.error) {
     throw response.error;
   }
 
-  var rows = response.data || [];
+  var rows =
+    response.data || [];
+
   var paths = [];
 
-  rows.forEach(function (row) {
-    paths = paths.concat(
-      collectStoragePaths(
-        row.record
-      )
-    );
-  });
+  rows.forEach(
+    function (row) {
+      paths =
+        paths.concat(
+          collectStoragePaths(
+            row.record
+          )
+        );
+    }
+  );
 
   if (paths.length) {
     var storageResponse =
@@ -989,7 +1162,10 @@ export async function clearCloudHistory(uid) {
     await supabase
       .from("inspections")
       .delete()
-      .eq("owner_uid", uid);
+      .eq(
+        "owner_uid",
+        uid
+      );
 
   if (deleteResponse.error) {
     throw deleteResponse.error;

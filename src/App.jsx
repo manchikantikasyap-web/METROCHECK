@@ -7,6 +7,7 @@ import {
   deleteCloudInspection,
   getInspectorProfile,
   loadCloudHistory,
+  loadSupervisorHistory,
   loginInspectorWithSupabase,
   logoutInspectorFromSupabase,
   observeAuthSession,
@@ -22,8 +23,8 @@ const CURRENT_INSPECTOR_KEY = "metrocheck_current_inspector_v1";
 const AUTH_SESSION_KEY = "metrocheck_auth_session_v1";
 
 /*
- * Mock government registry for the SIH prototype. In production this would
- * be replaced by a secure department/Legal Metrology backend.
+ * Prototype inspector access registry for the SIH demo. In production this would
+ * be replaced by an authorized department identity directory.
  */
 const GOVERNMENT_INSPECTOR_REGISTRY = [
   {
@@ -32,6 +33,7 @@ const GOVERNMENT_INSPECTOR_REGISTRY = [
     email: "inspector@demo.metrology.gov.in",
     department: "Legal Metrology Department",
     office: "West Godavari",
+    role: "INSPECTOR",
   },
   {
     id: "INS-002",
@@ -39,6 +41,7 @@ const GOVERNMENT_INSPECTOR_REGISTRY = [
     email: "priya.sharma@demo.metrology.gov.in",
     department: "Legal Metrology Department",
     office: "Krishna",
+    role: "INSPECTOR",
   },
   {
     id: "INS-003",
@@ -46,6 +49,7 @@ const GOVERNMENT_INSPECTOR_REGISTRY = [
     email: "ravi.kumar@demo.metrology.gov.in",
     department: "Legal Metrology Department",
     office: "East Godavari",
+    role: "SUPERVISOR",
   },
 ];
 
@@ -86,6 +90,172 @@ const FIELD_CONFIG = [
   ["dimensions", "Dimensions", "e.g. 20 cm x 12 cm"],
   ["unitSalePrice", "Unit Sale Price", "e.g. ₹120/kg"],
 ];
+
+const PACKAGE_PANELS = [
+  { key: "front", label: "Front / Principal Panel", required: true },
+  { key: "back", label: "Back Panel", required: false },
+  { key: "left", label: "Left Panel", required: false },
+  { key: "right", label: "Right Panel", required: false },
+  { key: "top", label: "Top Panel", required: false },
+  { key: "bottom", label: "Bottom Panel", required: false },
+  { key: "additional", label: "Additional Label / Sticker", required: false },
+];
+
+function createEmptyPackageImages() {
+  return PACKAGE_PANELS.reduce(function (result, panel) {
+    result[panel.key] = null;
+    return result;
+  }, {});
+}
+
+function getPanelLabel(key) {
+  var panel = PACKAGE_PANELS.find(function (item) {
+    return item.key === key;
+  });
+  return panel ? panel.label : String(key || "Package panel");
+}
+
+function getCapturedPanelKeys(packageImages) {
+  return Object.keys(packageImages || {}).filter(function (key) {
+    var item = packageImages[key];
+    return Boolean(item && item.preview);
+  });
+}
+
+function serializePackageImages(packageImages) {
+  var result = {};
+  PACKAGE_PANELS.forEach(function (panel) {
+    var item = packageImages && packageImages[panel.key];
+    result[panel.key] = item && item.preview ? item.preview : "";
+  });
+  return result;
+}
+
+function hydratePackageImages(savedPackageImages) {
+  var result = createEmptyPackageImages();
+  PACKAGE_PANELS.forEach(function (panel) {
+    var value = savedPackageImages && savedPackageImages[panel.key];
+    result[panel.key] = value && !String(value).startsWith("blob:")
+      ? { file: null, preview: value }
+      : null;
+  });
+  return result;
+}
+
+function normalizeRole(value) {
+  var role = String(value || "INSPECTOR").toUpperCase();
+  return role === "SUPERVISOR" || role === "ADMIN" ? "SUPERVISOR" : "INSPECTOR";
+}
+
+function getWordBox(word) {
+  var box = word && (word.bbox || word.boundingBox);
+  if (!box) return null;
+  var x0 = Number(box.x0 ?? box.left ?? 0);
+  var y0 = Number(box.y0 ?? box.top ?? 0);
+  var x1 = Number(box.x1 ?? box.right ?? x0);
+  var y1 = Number(box.y1 ?? box.bottom ?? y0);
+  if (![x0, y0, x1, y1].every(Number.isFinite)) return null;
+  return { x0: x0, y0: y0, x1: x1, y1: y1 };
+}
+
+function analyzePanelOCR(response, panelKey) {
+  var data = response && response.data ? response.data : {};
+  var words = Array.isArray(data.words) ? data.words : [];
+  var boxes = words.map(getWordBox).filter(Boolean);
+  var heights = boxes.map(function (box) { return Math.max(0, box.y1 - box.y0); }).filter(Boolean);
+  heights.sort(function (a, b) { return a - b; });
+  var medianHeight = heights.length ? heights[Math.floor(heights.length / 2)] : 0;
+  var confidence = getOCRConfidence(response);
+  var readability = confidence === null
+    ? "REVIEW REQUIRED"
+    : confidence >= 75
+    ? "GOOD"
+    : confidence >= 60
+    ? "FAIR"
+    : "REVIEW REQUIRED";
+  var fontScreening = !medianHeight
+    ? "REVIEW REQUIRED"
+    : medianHeight >= 14
+    ? "SCREENING OK"
+    : "REVIEW REQUIRED";
+  return {
+    panel: panelKey,
+    label: getPanelLabel(panelKey),
+    confidence: confidence,
+    readability: readability,
+    medianTextHeightPx: Math.round(medianHeight),
+    fontScreening: fontScreening,
+    wordCount: words.length,
+  };
+}
+
+function findValuePlacement(response, value) {
+  var data = response && response.data ? response.data : {};
+  var words = Array.isArray(data.words) ? data.words : [];
+  var targetTokens = normalizeText(value).toLowerCase().split(/\s+/).filter(Boolean).slice(0, 3);
+  if (!targetTokens.length || !words.length) return null;
+
+  var matches = words.filter(function (word) {
+    var text = String(word && word.text || "").toLowerCase();
+    return targetTokens.some(function (token) {
+      return token.length > 2 && (text.includes(token) || token.includes(text));
+    });
+  });
+  var boxes = matches.map(getWordBox).filter(Boolean);
+  if (!boxes.length) return null;
+
+  var allBoxes = words.map(getWordBox).filter(Boolean);
+  var maxX = Math.max.apply(null, allBoxes.map(function (box) { return box.x1; }).concat([1]));
+  var maxY = Math.max.apply(null, allBoxes.map(function (box) { return box.y1; }).concat([1]));
+  var centerX = boxes.reduce(function (sum, box) { return sum + (box.x0 + box.x1) / 2; }, 0) / boxes.length;
+  var centerY = boxes.reduce(function (sum, box) { return sum + (box.y0 + box.y1) / 2; }, 0) / boxes.length;
+  var horizontal = centerX < maxX / 3 ? "left" : centerX > (maxX * 2) / 3 ? "right" : "center";
+  var vertical = centerY < maxY / 3 ? "upper" : centerY > (maxY * 2) / 3 ? "lower" : "middle";
+  var heights = boxes.map(function (box) { return box.y1 - box.y0; }).filter(Boolean);
+  var avgHeight = heights.length ? heights.reduce(function (sum, item) { return sum + item; }, 0) / heights.length : 0;
+  return { zone: vertical + "-" + horizontal, textHeightPx: Math.round(avgHeight) };
+}
+
+function applyFormatValidation(results, fields) {
+  return results.map(function (item) {
+    var next = Object.assign({}, item);
+    if (next.status !== "PASS") return next;
+
+    if (next.id === "mrp") {
+      var mrp = String(fields.mrp || "").trim();
+      if (!/(?:₹|rs\.?|inr)/i.test(mrp) || !/\d/.test(mrp)) {
+        next.status = "REVIEW REQUIRED";
+        next.message = "An MRP value was detected, but its currency/price expression appears non-standard. Verify the complete MRP wording and inclusive-of-taxes presentation on the package.";
+      }
+    }
+
+    if (next.id === "quantity") {
+      var quantity = String(fields.netQuantity || "").trim();
+      if (!/\b\d+(?:\.\d+)?\s*(mg|g|kg|ml|l|litre|litres|millilitre|millilitres|count|nos?\.?)\b/i.test(quantity)) {
+        next.status = "REVIEW REQUIRED";
+        next.message = "A net-quantity value was detected, but the quantity/unit expression needs manual verification for the prescribed standard unit and manner of declaration.";
+      }
+    }
+
+    if (next.id === "consumer") {
+      var care = String(fields.consumerCare || "").trim();
+      if (!/(?:\+?\d[\d\s-]{7,}|@|www\.|email|phone|tel|care)/i.test(care)) {
+        next.status = "REVIEW REQUIRED";
+        next.message = "Consumer-care text was detected, but complete complaint/contact information could not be confidently validated. Verify the prescribed contact details manually.";
+      }
+    }
+
+    if (next.id === "date") {
+      var dateText = String(fields.manufactureDate || "").trim();
+      if (!/(?:\b(?:0?[1-9]|1[0-2])[\/-]\d{2,4}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*\d{2,4}\b|\b20\d{2}\b)/i.test(dateText)) {
+        next.status = "REVIEW REQUIRED";
+        next.message = "A manufacture/packing date was detected, but the date format could not be confidently validated. Verify the declaration manually.";
+      }
+    }
+
+    return next;
+  });
+}
 
 const RULES = [
   {
@@ -998,7 +1168,7 @@ function runCompliance(
       quantityVerification.message;
   }
 
-  return results;
+  return applyFormatValidation(results, fields);
 }
 
 function scoreResults(results) {
@@ -1346,9 +1516,8 @@ function App() {
    * together as one inspection.
    */
   var [packageImages, setPackageImages] =
-    useState({
-      front: null,
-      back: null,
+    useState(function () {
+      return createEmptyPackageImages();
     });
 
   var [selectedImageSide, setSelectedImageSide] =
@@ -1356,6 +1525,12 @@ function App() {
 
   var [ocrText, setOcrText] =
     useState("");
+
+  var [fieldDetails, setFieldDetails] = useState({});
+  var [visualAnalysis, setVisualAnalysis] = useState([]);
+  var [inspectionSource, setInspectionSource] = useState("PACKAGE");
+  var [listingText, setListingText] = useState("");
+  var [publicMode, setPublicMode] = useState("AUTH");
 
   var [fields, setFields] = useState(
     Object.assign({}, EMPTY_FIELDS)
@@ -1583,13 +1758,12 @@ function App() {
     }
 
     var cancelled = false;
+    var role = normalizeRole(inspector && inspector.role);
+    var loader = role === "SUPERVISOR" ? loadSupervisorHistory : loadCloudHistory;
 
-    loadCloudHistory(supabaseUserUid)
+    loader(supabaseUserUid)
       .then(function (records) {
-        if (cancelled) {
-          return;
-        }
-
+        if (cancelled) return;
         setHistory(
           records.map(normalizeHistoryRecord).sort(function (a, b) {
             return getRecordTimestamp(b) - getRecordTimestamp(a);
@@ -1599,14 +1773,16 @@ function App() {
       .catch(function (error) {
         console.error("MetroCheck cloud history load failed:", error);
         if (!cancelled) {
-          setToast("Could not load inspection history from Supabase.");
+          setToast(role === "SUPERVISOR"
+            ? "Could not load supervisor inspection view. Run the V2 Supabase role migration and try again."
+            : "Could not load inspection history from Supabase.");
         }
       });
 
     return function () {
       cancelled = true;
     };
-  }, [supabaseUserUid]);
+  }, [supabaseUserUid, inspector && inspector.role]);
 
   useEffect(
     function () {
@@ -1895,12 +2071,13 @@ function App() {
 
     setImageFile(null);
     setImagePreview("");
-    setPackageImages({
-      front: null,
-      back: null,
-    });
+    setPackageImages(createEmptyPackageImages());
     setSelectedImageSide("front");
     setOcrText("");
+    setFieldDetails({});
+    setVisualAnalysis([]);
+    setInspectionSource("PACKAGE");
+    setListingText("");
 
     setFields(
       Object.assign({}, EMPTY_FIELDS)
@@ -1958,12 +2135,10 @@ function App() {
       return;
     }
 
-    var targetSide =
-      side === "back"
-        ? "back"
-        : side === "front"
-        ? "front"
-        : selectedImageSide;
+    var validPanel = PACKAGE_PANELS.some(function (panel) {
+      return panel.key === side;
+    });
+    var targetSide = validPanel ? side : selectedImageSide;
 
     var previewUrl;
 
@@ -2014,16 +2189,17 @@ function App() {
     setOcrText("");
     setOCRConfidence(null);
     setFieldSources({});
+    setFieldDetails({});
+    setVisualAnalysis([]);
     setFields(Object.assign({}, EMPTY_FIELDS));
 
-    showToast(
-      (targetSide === "front" ? "Front" : "Back") +
-        " package image loaded."
-    );
+    showToast(getPanelLabel(targetSide) + " image loaded.");
   }
 
   function openCamera(side) {
-    var targetSide = side === "back" ? "back" : "front";
+    var targetSide = PACKAGE_PANELS.some(function (panel) { return panel.key === side; })
+      ? side
+      : "front";
 
     /*
      * Camera ownership is intentionally kept inside CameraModal.
@@ -2044,7 +2220,9 @@ function App() {
       return;
     }
 
-    var targetSide = side === "back" ? "back" : "front";
+    var targetSide = PACKAGE_PANELS.some(function (panel) { return panel.key === side; })
+      ? side
+      : "front";
     activeCameraSideRef.current = targetSide;
     setSelectedImageSide(targetSide);
     handleImage(file, targetSide);
@@ -2131,10 +2309,10 @@ function App() {
       }
 
       try {
-        var captureSide =
-          activeCameraSideRef.current === "back"
-            ? "back"
-            : "front";
+        var requestedSide = activeCameraSideRef.current;
+        var captureSide = PACKAGE_PANELS.some(function (panel) { return panel.key === requestedSide; })
+          ? requestedSide
+          : "front";
 
         var file =
           typeof File === "function"
@@ -2199,10 +2377,11 @@ function App() {
 
         closeCamera();
 
+        setFieldDetails({});
+        setVisualAnalysis([]);
+
         showToast(
-          (captureSide === "front"
-            ? "Front"
-            : "Back") +
+          getPanelLabel(captureSide) +
             " photo captured successfully."
         );
       } catch (error) {
@@ -2263,20 +2442,10 @@ function App() {
   }
 
   async function runOCR() {
-    var imagesToScan = [
-      {
-        side: "front",
-        item: packageImages.front,
-      },
-      {
-        side: "back",
-        item: packageImages.back,
-      },
-    ].filter(function (entry) {
-      return (
-        entry.item &&
-        entry.item.preview
-      );
+    var imagesToScan = PACKAGE_PANELS.map(function (panel) {
+      return { side: panel.key, item: packageImages && packageImages[panel.key] };
+    }).filter(function (entry) {
+      return entry.item && entry.item.preview;
     });
 
     /*
@@ -2296,9 +2465,13 @@ function App() {
       ];
     }
 
-    if (imagesToScan.length === 0) {
+    var hasListingText = inspectionSource === "ECOMMERCE" && normalizeText(listingText).length > 0;
+
+    if (imagesToScan.length === 0 && !hasListingText) {
       showToast(
-        "Capture or upload the front and/or back package image first."
+        inspectionSource === "ECOMMERCE"
+          ? "Upload a listing screenshot or paste the product-listing information first."
+          : "Capture or upload at least the principal package panel first."
       );
       return;
     }
@@ -2315,6 +2488,9 @@ function App() {
 
       var collectedText = [];
       var confidenceValues = [];
+      var mergedFields = Object.assign({}, EMPTY_FIELDS);
+      var nextFieldDetails = {};
+      var nextVisualAnalysis = [];
 
       for (
         var index = 0;
@@ -2377,6 +2553,46 @@ function App() {
             Number(sideConfidence)
           );
         }
+
+        nextVisualAnalysis.push(analyzePanelOCR(response, entry.side));
+        var sideFields = extractFields(sideText);
+        Object.keys(sideFields).forEach(function (key) {
+          var value = String(sideFields[key] || "").trim();
+          if (!value || String(mergedFields[key] || "").trim()) return;
+          mergedFields[key] = sideFields[key];
+          var placement = findValuePlacement(response, sideFields[key]);
+          nextFieldDetails[key] = {
+            source: "OCR",
+            panel: entry.side,
+            panelLabel: getPanelLabel(entry.side),
+            zone: placement ? placement.zone : "panel location",
+            textHeightPx: placement ? placement.textHeightPx : 0,
+            confidence: sideConfidence,
+            readability: sideConfidence === null ? "REVIEW REQUIRED" : sideConfidence >= 75 ? "GOOD" : sideConfidence >= 60 ? "FAIR" : "REVIEW REQUIRED",
+            fontScreening: placement && placement.textHeightPx >= 14 ? "SCREENING OK" : "REVIEW REQUIRED",
+          };
+        });
+      }
+
+      if (hasListingText) {
+        var cleanListing = normalizeText(listingText);
+        collectedText.push("===== E-COMMERCE LISTING =====\n" + cleanListing);
+        var listingFields = extractFields(cleanListing);
+        Object.keys(listingFields).forEach(function (key) {
+          var value = String(listingFields[key] || "").trim();
+          if (!value || String(mergedFields[key] || "").trim()) return;
+          mergedFields[key] = listingFields[key];
+          nextFieldDetails[key] = {
+            source: "LISTING TEXT",
+            panel: "listing",
+            panelLabel: "E-commerce Listing",
+            zone: "listing content",
+            textHeightPx: 0,
+            confidence: null,
+            readability: "TEXT INPUT",
+            fontScreening: "NOT APPLICABLE",
+          };
+        });
       }
 
       setScanProgress(92);
@@ -2402,34 +2618,47 @@ function App() {
       );
       setOcrText(combinedText);
 
-      var extracted =
-        extractFields(combinedText);
-      var extractedSources = {};
-
-      Object.keys(extracted).forEach(
-        function (key) {
-          if (
-            String(
-              extracted[key] || ""
-            ).trim()
-          ) {
-            extractedSources[key] =
-              "OCR";
+      var fallbackExtracted = extractFields(combinedText);
+      Object.keys(fallbackExtracted).forEach(function (key) {
+        if (!String(mergedFields[key] || "").trim() && String(fallbackExtracted[key] || "").trim()) {
+          mergedFields[key] = fallbackExtracted[key];
+          if (!nextFieldDetails[key]) {
+            nextFieldDetails[key] = {
+              source: "OCR",
+              panel: "combined",
+              panelLabel: "Combined scan",
+              zone: "unresolved",
+              textHeightPx: 0,
+              confidence: averageConfidence,
+              readability: averageConfidence !== null && averageConfidence >= 60 ? "FAIR" : "REVIEW REQUIRED",
+              fontScreening: "REVIEW REQUIRED",
+            };
           }
         }
-      );
+      });
 
-      setFieldSources(
-        extractedSources
-      );
-      setFields(extracted);
+      var extractedSources = {};
+      Object.keys(mergedFields).forEach(function (key) {
+        if (String(mergedFields[key] || "").trim()) {
+          extractedSources[key] = nextFieldDetails[key] && nextFieldDetails[key].source === "LISTING TEXT"
+            ? "LISTING"
+            : "OCR";
+        }
+      });
+
+      setFieldSources(extractedSources);
+      setFieldDetails(nextFieldDetails);
+      setVisualAnalysis(nextVisualAnalysis);
+      setFields(mergedFields);
 
       setScanProgress(100);
       setScanState("complete");
 
       showToast(
-        imagesToScan.length === 2
-          ? "Front and back package images analyzed successfully."
+        imagesToScan.length > 1
+          ? String(imagesToScan.length) + " package panels analyzed successfully."
+          : hasListingText && imagesToScan.length === 0
+          ? "E-commerce listing analyzed successfully."
           : "Package image analyzed successfully."
       );
     } catch (error) {
@@ -2463,13 +2692,21 @@ function App() {
     });
 
     setFieldSources(function (previous) {
-      return Object.assign(
-        {},
-        previous,
-        {
-          [key]: "MANUAL",
-        }
-      );
+      return Object.assign({}, previous, { [key]: "MANUAL" });
+    });
+    setFieldDetails(function (previous) {
+      return Object.assign({}, previous, {
+        [key]: {
+          source: "MANUAL",
+          panel: "manual",
+          panelLabel: "Inspector entry",
+          zone: "manual",
+          textHeightPx: 0,
+          confidence: null,
+          readability: "MANUAL",
+          fontScreening: "MANUAL VERIFY",
+        },
+      });
     });
   }
 
@@ -2528,7 +2765,7 @@ function App() {
 
     if (!cleanId || !cleanEmail || !password) {
       showToast(
-        "Enter the government inspector ID, official email and password."
+        "Enter the MetroCheck inspector ID, registered email and password."
       );
       return false;
     }
@@ -2540,7 +2777,7 @@ function App() {
 
     if (!registryRecord) {
       showToast(
-        "Inspector could not be verified against the government registry."
+        "Inspector could not be verified against the MetroCheck prototype registry."
       );
       return false;
     }
@@ -2645,6 +2882,7 @@ function App() {
       email: "inspector@demo.metrology.gov.in",
       department: "Legal Metrology Department",
       office: "West Godavari",
+      role: "INSPECTOR",
       verified: true,
     };
 
@@ -2833,17 +3071,12 @@ function App() {
       imagePreview:
         imagePreview,
 
-      packageImages:
-        {
-          front:
-            packageImages.front
-              ? packageImages.front.preview
-              : "",
-          back:
-            packageImages.back
-              ? packageImages.back.preview
-              : "",
-        },
+      packageImages: serializePackageImages(packageImages),
+
+      inspectionSource: inspectionSource,
+      listingText: listingText,
+      fieldDetails: fieldDetails,
+      visualAnalysis: visualAnalysis,
 
       fields:
         Object.assign({}, fields),
@@ -2928,14 +3161,7 @@ function App() {
         });
 
         setImagePreview(normalizedCloudRecord.imagePreview || "");
-        setPackageImages({
-          front: normalizedCloudRecord.packageImages && normalizedCloudRecord.packageImages.front
-            ? { file: null, preview: normalizedCloudRecord.packageImages.front }
-            : null,
-          back: normalizedCloudRecord.packageImages && normalizedCloudRecord.packageImages.back
-            ? { file: null, preview: normalizedCloudRecord.packageImages.back }
-            : null,
-        });
+        setPackageImages(hydratePackageImages(normalizedCloudRecord.packageImages));
         setEvidence(normalizedCloudRecord.evidence || []);
         setDecision(finalStatus);
         showToast("Inspection saved securely to Supabase.");
@@ -3012,39 +3238,16 @@ function App() {
 
     setImageFile(null);
 
-    var savedPackageImages =
-      normalizedRecord.packageImages || {
-        front: "",
-        back: "",
-      };
-
-    setPackageImages({
-      front:
-        savedPackageImages.front &&
-        !String(savedPackageImages.front).startsWith("blob:")
-          ? {
-              file: null,
-              preview:
-                savedPackageImages.front,
-            }
-          : null,
-      back:
-        savedPackageImages.back &&
-        !String(savedPackageImages.back).startsWith("blob:")
-          ? {
-              file: null,
-              preview:
-                savedPackageImages.back,
-            }
-          : null,
+    var savedPackageImages = normalizedRecord.packageImages || {};
+    setPackageImages(hydratePackageImages(savedPackageImages));
+    var firstCaptured = PACKAGE_PANELS.find(function (panel) {
+      return savedPackageImages && savedPackageImages[panel.key];
     });
-
-    setSelectedImageSide(
-      savedPackageImages.back &&
-      !savedPackageImages.front
-        ? "back"
-        : "front"
-    );
+    setSelectedImageSide(firstCaptured ? firstCaptured.key : "front");
+    setInspectionSource(normalizedRecord.inspectionSource || "PACKAGE");
+    setListingText(normalizedRecord.listingText || "");
+    setFieldDetails(normalizedRecord.fieldDetails || {});
+    setVisualAnalysis(Array.isArray(normalizedRecord.visualAnalysis) ? normalizedRecord.visualAnalysis : []);
 
     setFields(
       normalizedRecord.fields
@@ -3061,7 +3264,14 @@ function App() {
         : null
     );
 
-    setFieldSources({});
+    setFieldSources(
+      Object.keys(normalizedRecord.fields || {}).reduce(function (result, key) {
+        if (String(normalizedRecord.fields[key] || "").trim()) {
+          result[key] = normalizedRecord.fieldDetails && normalizedRecord.fieldDetails[key] && normalizedRecord.fieldDetails[key].source === "MANUAL" ? "MANUAL" : "OCR";
+        }
+        return result;
+      }, {})
+    );
 
     setPhysicalQuantity(
       normalizedRecord.physicalQuantity ||
@@ -3704,6 +3914,74 @@ function App() {
     );
   }
 
+  function generateEditableCSV() {
+    function csvCell(value) {
+      return '"' + String(value === null || value === undefined ? "" : value).replace(/"/g, '""') + '"';
+    }
+
+    var rows = [
+      ["MetroCheck Editable Compliance Report", ""],
+      ["Inspection ID", inspectionId],
+      ["Inspection Source", inspectionSource === "ECOMMERCE" ? "E-commerce Listing" : "Physical Package"],
+      ["Date", formatDate(new Date(inspectionTimestamp || Date.now()))],
+      ["Inspector", inspector.name || ""],
+      ["Inspector ID", inspector.id || ""],
+      ["Inspector Role", normalizeRole(inspector.role)],
+      ["Automated Status", status],
+      ["Inspector Decision", decision || "Pending verification"],
+      ["Compliance Score", score + "%"],
+      [],
+      ["Declaration", "Value", "Source", "Panel", "Placement", "Readability", "Font-size screening"],
+    ];
+
+    FIELD_CONFIG.forEach(function (item) {
+      var key = item[0];
+      var detail = fieldDetails[key] || {};
+      rows.push([
+        item[1],
+        fields[key] || "Not identified",
+        detail.source || fieldSources[key] || "",
+        detail.panelLabel || "",
+        detail.zone || "",
+        detail.readability || "",
+        detail.fontScreening || "",
+      ]);
+    });
+
+    rows.push([], ["Rule", "Legal basis", "Status", "Message"]);
+    results.forEach(function (rule) {
+      rows.push([rule.title, rule.reference, rule.status, rule.message]);
+    });
+
+    rows.push([], ["Measured Quantity", physicalQuantity ? physicalQuantity + " " + physicalUnit : "Not entered"]);
+    rows.push(["Inspector Notes", notes || ""]);
+
+    var csv = rows.map(function (row) {
+      return (row || []).map(csvCell).join(",");
+    }).join("\r\n");
+
+    var blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = inspectionId + "-MetroCheck-Editable.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    showToast("Editable CSV report generated.");
+  }
+
+  if (publicMode === "CONSUMER") {
+    return (
+      <ConsumerQuickCheck
+        darkMode={darkMode}
+        onBack={function () { setPublicMode("AUTH"); }}
+        onToggleDarkMode={function () { setDarkMode(function (previous) { return !previous; }); }}
+      />
+    );
+  }
+
   if (authInitializing) {
     return (
       <div
@@ -3736,6 +4014,7 @@ function App() {
         onRegister={registerInspector}
         onLogin={loginInspector}
         onDemoLogin={demoLogin}
+        onConsumerMode={function () { setPublicMode("CONSUMER"); }}
         toast={toast}
         cloudReady={supabaseReady}
         cloudError={supabaseConfigError}
@@ -3745,6 +4024,58 @@ function App() {
 
   return (
     <div className="app-shell">
+      <style>{`
+        .mc-mobile-nav { display: none; }
+        @media (max-width: 760px) {
+          .app-shell { display: block !important; min-height: 100vh; }
+          .sidebar { display: none !important; }
+          .main-content { width: 100% !important; margin: 0 !important; padding-bottom: 84px !important; }
+          .topbar { min-height: 58px !important; padding: 10px 14px !important; position: sticky; top: 0; z-index: 50; }
+          .secure-status { display: none !important; }
+          .page { padding: 14px !important; }
+          .hero { padding: 22px 18px !important; }
+          .hero h1 { font-size: clamp(34px, 10vw, 48px) !important; }
+          .hero-visual { display: none !important; }
+          .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .dashboard-grid, .scanner-layout { grid-template-columns: 1fr !important; }
+          .scanner-right { position: static !important; }
+          .inspection-progress { overflow-x: auto; gap: 6px !important; padding-bottom: 5px; }
+          .inspection-progress > * { flex: 0 0 auto; }
+          .panel { border-radius: 14px !important; }
+          .panel-header { align-items: flex-start !important; gap: 10px !important; }
+          .field-grid { grid-template-columns: 1fr !important; }
+          .final-actions { display: grid !important; grid-template-columns: 1fr !important; }
+          .final-actions button { width: 100% !important; justify-content: center !important; }
+          .history-head { display: none !important; }
+          .history-row { grid-template-columns: 1fr !important; gap: 9px !important; }
+          .history-toolbar { align-items: stretch !important; flex-direction: column !important; }
+          .filter-buttons { overflow-x: auto; padding-bottom: 4px; }
+          .visual-analysis-row { grid-template-columns: 1fr 1fr !important; }
+          .mc-mobile-nav {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            position: fixed;
+            left: 10px; right: 10px; bottom: 10px;
+            z-index: 1000;
+            padding: 7px;
+            border-radius: 16px;
+            background: var(--surface, #ffffff);
+            border: 1px solid var(--border, rgba(100,120,150,0.18));
+            box-shadow: 0 14px 40px rgba(15,23,42,0.20);
+          }
+          .mc-mobile-nav button {
+            border: 0; background: transparent; color: inherit; cursor: pointer;
+            padding: 8px 4px; border-radius: 10px; font-size: 10px; font-weight: 800;
+            display: grid; gap: 3px; place-items: center;
+          }
+          .mc-mobile-nav button.active { background: rgba(37,99,235,0.10); color: #2563eb; }
+        }
+        @media (max-width: 420px) {
+          .stat-grid { grid-template-columns: 1fr !important; }
+          .page { padding: 10px !important; }
+          .topbar { padding: 8px 10px !important; }
+        }
+      `}</style>
       {/* Native mobile camera inputs. Kept mounted so iOS/Android can
           open the camera directly from the user's tap. */}
       <input
@@ -4045,6 +4376,7 @@ function App() {
           "dashboard" && (
           <DashboardPage
             history={history}
+            inspector={inspector}
             onNewInspection={
               startNewInspection
             }
@@ -4075,6 +4407,8 @@ function App() {
             packageImages={
               packageImages
             }
+            inspectionSource={inspectionSource}
+            listingText={listingText}
             selectedImageSide={
               selectedImageSide
             }
@@ -4093,6 +4427,8 @@ function App() {
             fieldSources={
               fieldSources
             }
+            fieldDetails={fieldDetails}
+            visualAnalysis={visualAnalysis}
             intelligence={
               intelligence
             }
@@ -4156,6 +4492,8 @@ function App() {
             onImage={
               handleImage
             }
+            onInspectionSource={setInspectionSource}
+            onListingText={setListingText}
             onSelectImageSide={
               setSelectedImageSide
             }
@@ -4192,6 +4530,7 @@ function App() {
             onPDF={
               generatePDF
             }
+            onCSV={generateEditableCSV}
             onReset={
               resetInspection
             }
@@ -4250,6 +4589,27 @@ function App() {
         )}
       </main>
 
+      <nav className="mc-mobile-nav" aria-label="MetroCheck mobile navigation">
+        {[
+          ["dashboard", "grid", "Home"],
+          ["scanner", "scan", "Inspect"],
+          ["history", "history", "History"],
+          ["about", "info", "About"],
+        ].map(function (item) {
+          return (
+            <button
+              type="button"
+              key={item[0]}
+              className={page === item[0] ? "active" : ""}
+              onClick={function () { navigate(item[0]); }}
+            >
+              <Icon name={item[1]} size={17} />
+              <span>{item[2]}</span>
+            </button>
+          );
+        })}
+      </nav>
+
       {settingsOpen && (
         <SettingsModal
           view={settingsView}
@@ -4288,6 +4648,8 @@ function App() {
 
 function DashboardPage(props) {
   var history = props.history;
+  var dashboardRole = normalizeRole(props.inspector && props.inspector.role);
+  var isSupervisor = dashboardRole === "SUPERVISOR";
 
   var compliant =
     history.filter(function (item) {
@@ -4341,8 +4703,7 @@ function DashboardPage(props) {
       <section className="hero">
         <div>
           <div className="eyebrow">
-            LEGAL METROLOGY •
-            INSPECTION WORKSPACE
+            {isSupervisor ? "LEGAL METROLOGY • SUPERVISOR OVERVIEW" : "LEGAL METROLOGY • INSPECTION WORKSPACE"}
           </div>
 
           <h1>
@@ -4354,15 +4715,9 @@ function DashboardPage(props) {
           </h1>
 
           <p>
-            Scan packaged
-            commodity labels,
-            identify mandatory
-            declarations, analyze
-            compliance
-            requirements and
-            create an
-            inspection-ready
-            report.
+            {isSupervisor
+              ? "Monitor inspection activity, review compliance outcomes, identify repeated violations and open records that need supervisory attention."
+              : "Scan packaged commodity labels, identify mandatory declarations, analyze compliance requirements and create an inspection-ready report."}
           </p>
 
           <div className="hero-actions">
@@ -4459,7 +4814,7 @@ function DashboardPage(props) {
           value={
             history.length
           }
-          caption="Saved in this browser"
+          caption="Secure cloud inspection records"
           icon="file"
           tone="blue"
         />
@@ -4871,8 +5226,10 @@ function WorkflowStep(props) {
 }
 
 function ScannerPage(props) {
-  var [showOCR, setShowOCR] =
-    useState(false);
+  var [showOCR, setShowOCR] = useState(false);
+  var capturedPanelKeys = getCapturedPanelKeys(props.packageImages);
+  var capturedPanelCount = capturedPanelKeys.length;
+  var hasListingText = props.inspectionSource === "ECOMMERCE" && normalizeText(props.listingText).length > 0;
 
   return (
     <div className="page scanner-page">
@@ -4882,7 +5239,7 @@ function ScannerPage(props) {
         text={
           "Inspection ID " +
           props.inspectionId +
-          " • Capture both package panels, analyze and verify."
+          " • Capture relevant package panels or listing information, analyze and verify."
         }
         action={
           <button
@@ -4905,9 +5262,7 @@ function ScannerPage(props) {
         <ProgressStep
           number="01"
           title="Capture"
-          active={
-            !!props.imagePreview
-          }
+          active={capturedPanelCount > 0 || hasListingText}
         />
 
         <div className="progress-line" />
@@ -4953,7 +5308,7 @@ function ScannerPage(props) {
                 </span>
 
                 <h3>
-                  Product / label image
+                  Package coverage / listing source
                 </h3>
               </div>
 
@@ -4968,17 +5323,58 @@ function ScannerPage(props) {
             <div
               style={{
                 display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: "10px",
+                marginBottom: "16px",
+              }}
+            >
+              {[
+                ["PACKAGE", "Physical Package", "Capture package panels"],
+                ["ECOMMERCE", "E-commerce Listing", "Screenshot or listing text"],
+              ].map(function (item) {
+                var active = props.inspectionSource === item[0];
+                return (
+                  <button
+                    type="button"
+                    key={item[0]}
+                    className={active ? "primary-button" : "secondary-button"}
+                    style={{ minHeight: "58px", justifyContent: "flex-start", textAlign: "left" }}
+                    onClick={function () { props.onInspectionSource(item[0]); }}
+                  >
+                    <span>
+                      <strong style={{ display: "block" }}>{item[1]}</strong>
+                      <small style={{ display: "block", marginTop: "3px", opacity: 0.75 }}>{item[2]}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {props.inspectionSource === "ECOMMERCE" && (
+              <div className="field" style={{ marginBottom: "16px" }}>
+                <label>Product listing information</label>
+                <textarea
+                  rows={5}
+                  value={props.listingText}
+                  onChange={function (event) { props.onListingText(event.target.value); }}
+                  placeholder="Paste visible e-commerce product title, MRP, quantity, manufacturer/importer, country of origin, consumer care and other listing declarations here. You can also upload listing screenshots below."
+                />
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "grid",
                 gridTemplateColumns:
                   "repeat(auto-fit, minmax(240px, 1fr))",
                 gap: "14px",
                 marginBottom: "16px",
               }}
             >
-              {["front", "back"].map(
-                function (side) {
-                  var image =
-                    props.packageImages &&
-                    props.packageImages[side];
+              {PACKAGE_PANELS.map(
+                function (panel) {
+                  var side = panel.key;
+                  var image = props.packageImages && props.packageImages[side];
 
                   return (
                     <div
@@ -5010,7 +5406,7 @@ function ScannerPage(props) {
                               "0.06em",
                           }}
                         >
-                          {side} side
+                          {panel.label}
                         </strong>
 
                         <span
@@ -5020,9 +5416,7 @@ function ScannerPage(props) {
                             opacity: 0.65,
                           }}
                         >
-                          {image
-                            ? "Captured"
-                            : "Required"}
+                          {image ? "Captured" : panel.required ? "Recommended" : "Optional"}
                         </span>
                       </div>
 
@@ -5132,7 +5526,7 @@ function ScannerPage(props) {
                                 "6px",
                             }}
                           >
-                            Upload {side} photo
+                            Upload {panel.label}
                           </strong>
 
                           <small
@@ -5169,7 +5563,7 @@ function ScannerPage(props) {
                           name="camera"
                           size={17}
                         />
-                        Capture {side}
+                        Capture {panel.label}
                       </button>
                     </div>
                   );
@@ -5191,13 +5585,10 @@ function ScannerPage(props) {
               }}
             >
               <strong>
-                Capture both package panels
+                Multi-panel package coverage
               </strong>
               <div style={{ marginTop: "3px" }}>
-                MetroCheck combines the front and back
-                images into one inspection. If a declaration
-                appears on another panel, the inspector can
-                add that evidence separately.
+                Capture the Front / Principal Panel first, then add Back, Left, Right, Top, Bottom or an additional label/sticker when applicable. MetroCheck keeps each declaration tied to the panel where OCR detected it.
               </div>
             </div>
 
@@ -5217,23 +5608,19 @@ function ScannerPage(props) {
 
                 <div>
                   <strong>
-                    {props.packageImages &&
-                    props.packageImages.front &&
-                    props.packageImages.back
-                      ? "Front + back images ready"
-                      : props.packageImages &&
-                        (props.packageImages.front ||
-                          props.packageImages.back)
-                      ? "1 package panel ready"
-                      : "No package image selected"}
+                    {capturedPanelCount
+                      ? String(capturedPanelCount) + " package panel" + (capturedPanelCount === 1 ? "" : "s") + " ready"
+                      : hasListingText
+                      ? "Listing text ready"
+                      : "No inspection source captured"}
                   </strong>
 
                   <span>
-                    {props.packageImages &&
-                    props.packageImages.front &&
-                    props.packageImages.back
-                      ? "Ready for combined OCR analysis"
-                      : "Add front and back for the most complete inspection"}
+                    {capturedPanelCount > 1
+                      ? "Ready for combined panel-aware OCR analysis"
+                      : props.inspectionSource === "ECOMMERCE"
+                      ? "Add a screenshot and/or listing text for stronger screening"
+                      : "Add relevant package sides for complete declaration coverage"}
                   </span>
                 </div>
               </div>
@@ -5244,15 +5631,8 @@ function ScannerPage(props) {
                   props.onScan
                 }
                 disabled={
-                  props.scanState ===
-                  "scanning" ||
-                  !(
-                    props.packageImages &&
-                    (
-                      props.packageImages.front ||
-                      props.packageImages.back
-                    )
-                  )
+                  props.scanState === "scanning" ||
+                  (capturedPanelCount === 0 && !hasListingText)
                 }
               >
                 <Icon
@@ -5271,7 +5651,7 @@ function ScannerPage(props) {
                   : props.scanState ===
                     "complete"
                   ? "Scan Again"
-                  : "Analyze Package"}
+                  : props.inspectionSource === "ECOMMERCE" ? "Analyze Listing" : "Analyze Package"}
               </button>
             </div>
 
@@ -5339,7 +5719,7 @@ function ScannerPage(props) {
             )}
           </div>
 
-          {props.imagePreview && (
+          {(capturedPanelCount > 0 || hasListingText) && (
             <div className="panel">
               <div className="panel-header">
                 <div>
@@ -5390,6 +5770,55 @@ function ScannerPage(props) {
                   </span>
                 </div>
               )}
+            </div>
+          )}
+
+          {props.visualAnalysis && props.visualAnalysis.length > 0 && (
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <span className="panel-kicker">VISUAL DECLARATION ANALYSIS</span>
+                  <h3>Readability, text-size screening & panel coverage</h3>
+                </div>
+                <StatusBadge
+                  status={props.visualAnalysis.some(function (item) { return item.readability === "REVIEW REQUIRED"; }) ? "REVIEW REQUIRED" : "SCREENING OK"}
+                />
+              </div>
+
+              <div style={{ display: "grid", gap: "10px" }}>
+                {props.visualAnalysis.map(function (item) {
+                  return (
+                    <div
+                      key={item.panel}
+                      className="visual-analysis-row"
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(150px, 1.4fr) repeat(4, minmax(90px, 1fr))",
+                        gap: "10px",
+                        alignItems: "center",
+                        padding: "11px 12px",
+                        borderRadius: "11px",
+                        border: "1px solid var(--border, rgba(100,120,150,0.16))",
+                        fontSize: "12px",
+                      }}
+                    >
+                      <strong>{item.label}</strong>
+                      <span>{item.confidence === null ? "—" : item.confidence + "%"} OCR</span>
+                      <span>{item.wordCount || 0} words</span>
+                      <span>{item.medianTextHeightPx ? item.medianTextHeightPx + " px median" : "Size review"}</span>
+                      <span>{item.readability}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="inspector-note" style={{ marginTop: "12px" }}>
+                <Icon name="info" size={18} />
+                <span>
+                  <strong>Font-size result is a screening aid.</strong><br />
+                  Pixel height depends on camera distance and image resolution. MetroCheck flags small/unclear text for review; statutory physical type-height compliance still requires calibrated measurement or inspector verification.
+                </span>
+              </div>
             </div>
           )}
 
@@ -5485,6 +5914,22 @@ function ScannerPage(props) {
                           placeholder
                         }
                       />
+
+                      {props.fieldDetails && props.fieldDetails[key] && (
+                        <small
+                          style={{
+                            display: "block",
+                            marginTop: "6px",
+                            lineHeight: 1.45,
+                            opacity: 0.72,
+                          }}
+                        >
+                          {props.fieldDetails[key].panelLabel || "Source unresolved"}
+                          {props.fieldDetails[key].zone && props.fieldDetails[key].zone !== "manual" ? " • " + props.fieldDetails[key].zone : ""}
+                          {props.fieldDetails[key].readability ? " • " + props.fieldDetails[key].readability : ""}
+                          {props.fieldDetails[key].fontScreening ? " • Font: " + props.fieldDetails[key].fontScreening : ""}
+                        </small>
+                      )}
                     </div>
                   );
                 }
@@ -6200,6 +6645,14 @@ function ScannerPage(props) {
               />
 
               Generate PDF
+            </button>
+
+            <button
+              className="secondary-button"
+              onClick={props.onCSV}
+            >
+              <Icon name="file" size={18} />
+              Export Editable CSV
             </button>
 
             <button
@@ -7479,13 +7932,13 @@ function AboutPage() {
         <AboutCard
           icon="camera"
           title="Camera Capture"
-          text="Inspectors can capture a package or label directly from the browser camera."
+          text="Inspectors can capture Front, Back, Left, Right, Top, Bottom and additional label/sticker views directly from the browser camera."
         />
 
         <AboutCard
           icon="scan"
           title="OCR & Computer Vision"
-          text="Package images are processed to identify visible text and declaration patterns."
+          text="Panel-aware OCR extracts declarations, source panel, approximate placement, readability and text-size screening signals."
         />
 
         <AboutCard
@@ -7503,7 +7956,19 @@ function AboutPage() {
         <AboutCard
           icon="file"
           title="Evidence & Reports"
-          text="Inspection records, package images and supporting evidence can be stored securely and exported as structured PDF reports."
+          text="Inspection records, package images and supporting evidence can be stored securely and exported as PDF plus editable CSV reports."
+        />
+
+        <AboutCard
+          icon="user"
+          title="Role-Based Access"
+          text="Consumers get a simple quick check, inspectors get the full enforcement workflow, and supervisors get oversight dashboards."
+        />
+
+        <AboutCard
+          icon="scan"
+          title="E-commerce Screening"
+          text="Product-listing screenshots and pasted listing declarations can be screened with the same structured compliance engine."
         />
       </div>
 
@@ -7560,6 +8025,204 @@ function AboutPage() {
           service.
         </p>
       </section>
+    </div>
+  );
+}
+
+function ConsumerQuickCheck(props) {
+  var [images, setImages] = useState([]);
+  var [listingText, setListingText] = useState("");
+  var [busy, setBusy] = useState(false);
+  var [progress, setProgress] = useState(0);
+  var [fields, setFields] = useState(Object.assign({}, EMPTY_FIELDS));
+  var [results, setResults] = useState([]);
+  var [ocrConfidence, setOCRConfidence] = useState(null);
+  var [error, setError] = useState("");
+
+  function addImages(fileList) {
+    var selected = Array.from(fileList || []).filter(function (file) {
+      return String(file.type || "").startsWith("image/");
+    }).slice(0, 8);
+
+    if (!selected.length) return;
+
+    setImages(function (previous) {
+      return previous.concat(selected.map(function (file, index) {
+        return {
+          id: file.name + "-" + file.lastModified + "-" + index + "-" + Math.random(),
+          file: file,
+          preview: URL.createObjectURL(file),
+        };
+      })).slice(0, 8);
+    });
+    setResults([]);
+    setFields(Object.assign({}, EMPTY_FIELDS));
+    setError("");
+  }
+
+  function removeImage(id) {
+    setImages(function (previous) {
+      return previous.filter(function (item) {
+        if (item.id === id && item.preview && item.preview.startsWith("blob:")) {
+          try { URL.revokeObjectURL(item.preview); } catch (_error) {}
+        }
+        return item.id !== id;
+      });
+    });
+  }
+
+  async function analyze() {
+    if (!images.length && !normalizeText(listingText)) {
+      setError("Add at least one package photo or paste product-listing information.");
+      return;
+    }
+
+    setBusy(true);
+    setProgress(5);
+    setError("");
+    var worker = null;
+
+    try {
+      var combined = [];
+      var confidences = [];
+      worker = images.length ? await createWorker("eng") : null;
+
+      for (var index = 0; index < images.length; index += 1) {
+        setProgress(Math.min(85, 10 + Math.round((index / Math.max(1, images.length)) * 70)));
+        var prepared = await prepareImageForOCR(images[index].file);
+        var response = await worker.recognize(prepared);
+        var text = normalizeText(response && response.data ? response.data.text : "");
+        if (text) combined.push(text);
+        var confidence = getOCRConfidence(response);
+        if (confidence !== null) confidences.push(confidence);
+      }
+
+      if (normalizeText(listingText)) combined.push(normalizeText(listingText));
+      var extracted = extractFields(combined.join("\n\n"));
+      var screening = runCompliance(extracted, "", "g");
+
+      setFields(extracted);
+      setResults(screening);
+      setOCRConfidence(confidences.length
+        ? Math.round(confidences.reduce(function (sum, value) { return sum + value; }, 0) / confidences.length)
+        : null);
+      setProgress(100);
+    } catch (consumerError) {
+      console.error("MetroCheck consumer OCR failed:", consumerError);
+      setError("The image could not be analyzed. Try a clearer photo or paste the visible package declarations.");
+    } finally {
+      if (worker) {
+        try { await worker.terminate(); } catch (_error) {}
+      }
+      setBusy(false);
+    }
+  }
+
+  var applicable = results.filter(function (item) { return item.status !== "NOT APPLICABLE"; });
+  var passed = applicable.filter(function (item) { return item.status === "PASS"; }).length;
+  var status = results.length ? overallStatus(results) : "NOT CHECKED";
+
+  var pageStyle = {
+    minHeight: "100vh",
+    padding: "18px",
+    background: props.darkMode ? "#07101d" : "#f3f6fb",
+    color: props.darkMode ? "#f8fbff" : "#102033",
+  };
+  var cardStyle = {
+    background: props.darkMode ? "#0d1928" : "#ffffff",
+    border: "1px solid " + (props.darkMode ? "#25384e" : "#dfe7f1"),
+    borderRadius: "18px",
+    padding: "18px",
+  };
+
+  return (
+    <div style={pageStyle}>
+      <div style={{ width: "min(900px, 100%)", margin: "0 auto" }}>
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+          <button type="button" className="secondary-button" onClick={props.onBack}>← Back to access</button>
+          <button type="button" className="secondary-button" onClick={props.onToggleDarkMode}>{props.darkMode ? "☀ Light" : "☾ Dark"}</button>
+        </header>
+
+        <section style={{ ...cardStyle, marginBottom: "14px" }}>
+          <span className="panel-kicker">CONSUMER QUICK CHECK</span>
+          <h1 style={{ margin: "8px 0 8px", fontSize: "clamp(28px, 7vw, 46px)", lineHeight: 1.04 }}>Check package declarations before you buy.</h1>
+          <p style={{ margin: 0, opacity: 0.72, lineHeight: 1.65 }}>
+            Upload clear package photos or a product-listing screenshot. MetroCheck screens visible declarations and highlights anything that may need attention.
+          </p>
+        </section>
+
+        <section style={{ ...cardStyle, marginBottom: "14px" }}>
+          <h3 style={{ marginTop: 0 }}>1. Add package photos</h3>
+          <label className="upload-zone" style={{ display: "grid", placeItems: "center", minHeight: "120px", cursor: "pointer", textAlign: "center" }}>
+            <input type="file" accept="image/*" multiple capture="environment" onChange={function (event) { addImages(event.target.files); event.target.value = ""; }} />
+            <span><strong>Capture or upload package sides</strong><br /><small>Front first, then add any side containing declarations. Up to 8 images.</small></span>
+          </label>
+
+          {images.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "10px", marginTop: "12px" }}>
+              {images.map(function (item, index) {
+                return (
+                  <div key={item.id} style={{ position: "relative", borderRadius: "12px", overflow: "hidden", minHeight: "130px", background: "#050b14" }}>
+                    <img src={item.preview} alt={"Consumer package view " + (index + 1)} style={{ width: "100%", height: "150px", objectFit: "contain" }} />
+                    <button type="button" onClick={function () { removeImage(item.id); }} style={{ position: "absolute", top: "7px", right: "7px", border: 0, borderRadius: "999px", width: "28px", height: "28px", cursor: "pointer" }}>×</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="field" style={{ marginTop: "14px" }}>
+            <label>Optional e-commerce listing text</label>
+            <textarea rows={4} value={listingText} onChange={function (event) { setListingText(event.target.value); }} placeholder="Paste visible title, MRP, net quantity, manufacturer/importer, origin, consumer care, dates, etc." />
+          </div>
+
+          <button type="button" className="primary-button large" disabled={busy} onClick={analyze} style={{ width: "100%", marginTop: "14px", justifyContent: "center" }}>
+            {busy ? "Analyzing… " + progress + "%" : "Run Consumer Check"}
+          </button>
+          {error && <div className="error-box" style={{ marginTop: "12px" }}>{error}</div>}
+        </section>
+
+        {results.length > 0 && (
+          <section style={cardStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start", flexWrap: "wrap" }}>
+              <div>
+                <span className="panel-kicker">SCREENING RESULT</span>
+                <h2 style={{ margin: "7px 0 4px" }}>{status === "COMPLIANT" ? "Declarations look complete" : "Some declarations need attention"}</h2>
+                <p style={{ margin: 0, opacity: 0.7 }}>{passed} of {applicable.length} applicable checks passed{ocrConfidence !== null ? " • OCR " + ocrConfidence + "%" : ""}.</p>
+              </div>
+              <StatusBadge status={status} />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px", marginTop: "16px" }}>
+              {FIELD_CONFIG.map(function (item) {
+                var value = fields[item[0]];
+                return (
+                  <div key={item[0]} style={{ padding: "11px", borderRadius: "10px", border: "1px solid rgba(100,120,150,0.16)" }}>
+                    <small style={{ opacity: 0.65 }}>{item[1]}</small>
+                    <strong style={{ display: "block", marginTop: "4px" }}>{value || "Not identified"}</strong>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "grid", gap: "8px", marginTop: "16px" }}>
+              {results.map(function (rule) {
+                return (
+                  <div key={rule.id} style={{ padding: "11px 12px", borderRadius: "10px", border: "1px solid rgba(100,120,150,0.16)" }}>
+                    <strong>{rule.status === "PASS" ? "✓ " : rule.status === "NOT APPLICABLE" ? "— " : "⚠ "}{rule.title}</strong>
+                    <div style={{ marginTop: "4px", fontSize: "12px", opacity: 0.72, lineHeight: 1.5 }}>{rule.message}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="inspector-note" style={{ marginTop: "14px" }}>
+              <Icon name="info" size={18} />
+              <span>This consumer result is informational screening only. It is not an official Legal Metrology determination or enforcement decision.</span>
+            </div>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
@@ -8348,12 +9011,26 @@ function InspectorAuthPage(props) {
           }
 
           .mc-auth-main {
-            padding-top: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            padding-top: 14px;
+          }
+
+          .mc-auth-access-wrap {
+            order: -1;
+            width: 100%;
+            margin: 0;
+          }
+
+          .mc-auth-hero {
+            order: 1;
+            padding-top: 0;
           }
 
           .mc-auth-title {
-            font-size: clamp(38px, 12vw, 54px);
-            line-height: 1.01;
+            font-size: clamp(30px, 9vw, 42px);
+            line-height: 1.03;
           }
 
           .mc-auth-lead {
@@ -8361,13 +9038,9 @@ function InspectorAuthPage(props) {
             margin-top: 17px;
           }
 
-          .mc-auth-proof {
-            margin-top: 18px;
-          }
-
+          .mc-auth-proof,
           .mc-auth-pipeline {
-            padding: 14px;
-            border-radius: 17px;
+            display: none;
           }
 
           .mc-auth-pipeline-row {
@@ -8417,7 +9090,7 @@ function InspectorAuthPage(props) {
           }
 
           .mc-auth-title {
-            font-size: 36px;
+            font-size: 30px;
           }
 
           .mc-auth-proof-item {
@@ -8523,11 +9196,11 @@ function InspectorAuthPage(props) {
 
               <div className="mc-auth-pipeline-row">
                 {[
-                  ["01", "Capture", "Front + back label"],
+                  ["01", "Capture", "Multi-panel package"],
                   ["02", "Extract", "OCR declarations"],
                   ["03", "Screen", "Rule engine"],
                   ["04", "Verify", "Inspector evidence"],
-                  ["05", "Report", "PDF + history"],
+                  ["05", "Report", "PDF + editable export"],
                 ].map(function (item) {
                   return (
                     <div className="mc-auth-pipeline-step" key={item[0]}>
@@ -8563,12 +9236,12 @@ function InspectorAuthPage(props) {
             >
               <div className="mc-auth-card-top">
                 <div>
-                  <div className="mc-auth-card-kicker">Inspector access</div>
+                  <div className="mc-auth-card-kicker">Enforcement access</div>
                 </div>
 
                 <div className="mc-auth-secure">
                   <span className="mc-auth-secure-mark">✓</span>
-                  Verified identity workflow
+                  Role-based secure workflow
                 </div>
               </div>
 
@@ -8581,8 +9254,19 @@ function InspectorAuthPage(props) {
               <p className="mc-auth-card-description">
                 {mode === "login"
                   ? "Sign in with the official email linked to your MetroCheck inspector account."
-                  : "First-time access verifies your Inspector ID and registered department email before account activation."}
+                  : "First-time access verifies your Inspector ID and registered MetroCheck email before account activation."}
               </p>
+
+              <button
+                type="button"
+                className="mc-auth-demo"
+                onClick={props.onConsumerMode}
+                style={{ marginBottom: "14px" }}
+              >
+                Consumer Quick Check — no inspector login required
+              </button>
+
+              <div className="mc-auth-divider">Inspector / Supervisor access</div>
 
               {!props.cloudReady && props.cloudError && (
                 <div className="mc-auth-alert" role="alert">
@@ -8661,7 +9345,7 @@ function InspectorAuthPage(props) {
                     Enter inspector workspace
                   </button>
 
-                  <div className="mc-auth-divider">Demo access</div>
+                  <div className="mc-auth-divider">Prototype inspector demo</div>
 
                   <button
                     type="button"
@@ -8678,7 +9362,7 @@ function InspectorAuthPage(props) {
               ) : (
                 <form onSubmit={submitRegistration}>
                   <label className="mc-auth-field">
-                    Government Inspector ID
+                    MetroCheck Inspector ID
                     <input
                       type="text"
                       value={inspectorId}
@@ -8934,13 +9618,14 @@ function SettingsModal(props) {
                       {inspector.name || "Inspector"}
                     </strong>
                     <span style={{ display: "block", marginTop: "3px", color: muted, fontSize: "12px" }}>
-                      Verified government inspector
+                      {normalizeRole(inspector.role) === "SUPERVISOR" ? "Verified MetroCheck supervisor" : "Verified MetroCheck inspector"}
                     </span>
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gap: "10px" }}>
                   <ProfileRow label="Inspector ID" value={inspector.id || "Not assigned"} />
+                  <ProfileRow label="Role" value={normalizeRole(inspector.role) === "SUPERVISOR" ? "Supervisor / Admin" : "Inspector"} />
                   <ProfileRow label="Official email" value={inspector.email || "Not registered"} />
                   <ProfileRow label="Department" value={inspector.department || "Legal Metrology Department"} />
                   <ProfileRow label="Office / jurisdiction" value={inspector.office || "Not specified"} />
@@ -8948,7 +9633,7 @@ function SettingsModal(props) {
               </div>
 
               <p style={{ margin: "12px 0 0", color: muted, fontSize: "12px", lineHeight: 1.55 }}>
-                These identity details come from the verified government registry record. They are not editable from the MetroCheck workspace.
+                These prototype identity details come from the MetroCheck access registry. Production deployment should integrate with the authorized department identity source.
               </p>
 
               <button
@@ -9011,7 +9696,7 @@ function SettingsModal(props) {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
                   <StatusBox label="Browser security" value={environmentReadiness.secure ? "Ready" : "Local browser mode"} />
                   <StatusBox label="Database" value={environmentReadiness.cloud ? "Supabase Cloud" : environmentReadiness.storage ? "LocalStorage fallback" : "Unavailable"} />
-                  <StatusBox label="Account model" value="Government registry verification" />
+                  <StatusBox label="Account model" value="Prototype registry verification" />
                   <StatusBox label="History isolation" value="Inspector ID scoped" />
                 </div>
               </div>
