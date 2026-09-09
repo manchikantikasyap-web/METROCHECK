@@ -2765,7 +2765,7 @@ function App() {
 
     if (!cleanId || !cleanEmail || !password) {
       showToast(
-        "Enter the MetroCheck inspector ID, registered email and password."
+        "Enter your approved MetroCheck Inspector ID, registered email and a password to activate access."
       );
       return false;
     }
@@ -2791,7 +2791,7 @@ function App() {
 
         if (registered.confirmationRequired || !registered.profile) {
           showToast(
-            "Account created. Confirm the email if Supabase email confirmation is enabled, then sign in."
+            "Activation started. Confirm the email if Supabase email confirmation is enabled, then sign in."
           );
           return true;
         }
@@ -2805,7 +2805,7 @@ function App() {
         setAuthenticatedInspectorId(cloudAccount.id);
         setSettingsOpen(false);
         resetInspection();
-        showToast("Inspector verified and cloud account created.");
+        showToast("Inspector access activated successfully.");
         return true;
       } catch (error) {
         console.error("MetroCheck Supabase registration failed:", error);
@@ -2816,10 +2816,10 @@ function App() {
           errorText.includes("already") ||
           errorText.includes("registered") ||
           errorText.includes("exists")
-            ? "This official email is already registered. Please sign in."
+            ? "This inspector access is already activated. Please sign in."
             : errorText.includes("inspector") || errorText.includes("registry")
-            ? "This inspector is not approved in the MetroCheck Supabase registry."
-            : "Could not create the Supabase inspector account. Check your Supabase setup and try again.";
+            ? "Activation denied: this Inspector ID and email are not approved in the MetroCheck registry."
+            : "Could not activate the Supabase inspector account. Check your Supabase setup and try again.";
         showToast(registrationMessage);
         return false;
       }
@@ -2833,7 +2833,7 @@ function App() {
 
     if (existing && existing.verified) {
       showToast(
-        "This inspector is already registered. Please sign in."
+        "This inspector access is already activated. Please sign in."
       );
       return false;
     }
@@ -4026,6 +4026,91 @@ function App() {
     <div className="app-shell">
       <style>{`
         .mc-mobile-nav { display: none; }
+
+        /* MetroCheck visual polish — presentation only, no workflow changes */
+        .app-shell {
+          background:
+            radial-gradient(circle at 80% -10%, rgba(37,99,235,0.10), transparent 32%),
+            radial-gradient(circle at 15% 110%, rgba(14,165,233,0.08), transparent 28%),
+            var(--background, #f6f8fc);
+        }
+        .sidebar {
+          border-right: 1px solid rgba(148,163,184,0.16) !important;
+          box-shadow: 10px 0 38px rgba(15,23,42,0.04);
+          backdrop-filter: blur(18px);
+        }
+        .brand-mark {
+          box-shadow: 0 12px 28px rgba(37,99,235,0.25) !important;
+          transform: translateZ(0);
+        }
+        .nav-item { transition: transform .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease; }
+        .nav-item:hover { transform: translateX(3px); }
+        .nav-item.active {
+          box-shadow: inset 0 0 0 1px rgba(37,99,235,0.08), 0 8px 22px rgba(37,99,235,0.08);
+        }
+        .topbar {
+          backdrop-filter: blur(18px);
+          -webkit-backdrop-filter: blur(18px);
+          background: color-mix(in srgb, var(--surface, #fff) 88%, transparent) !important;
+          border-bottom: 1px solid rgba(148,163,184,0.14);
+        }
+        .hero {
+          position: relative;
+          overflow: hidden;
+          border: 1px solid rgba(99,102,241,0.10);
+          background:
+            radial-gradient(circle at 88% 22%, rgba(59,130,246,0.16), transparent 24%),
+            radial-gradient(circle at 72% 90%, rgba(14,165,233,0.10), transparent 28%),
+            linear-gradient(135deg, color-mix(in srgb, var(--surface, #fff) 96%, #2563eb 4%), var(--surface, #fff));
+          box-shadow: 0 24px 70px rgba(15,23,42,0.08);
+        }
+        .hero::after {
+          content: "";
+          position: absolute;
+          width: 260px; height: 260px;
+          right: -120px; top: -120px;
+          border-radius: 999px;
+          border: 34px solid rgba(37,99,235,0.055);
+          pointer-events: none;
+        }
+        .hero h1 span {
+          background: linear-gradient(90deg,#2563eb,#0ea5e9);
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+        .primary-button, .secondary-button, .filter-buttons button {
+          transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+        }
+        .primary-button:hover, .secondary-button:hover { transform: translateY(-1px); }
+        .primary-button { box-shadow: 0 10px 24px rgba(37,99,235,0.20); }
+        .mc-history-cta {
+          background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 54%, #4f46e5 100%) !important;
+          color: #ffffff !important;
+          border-color: transparent !important;
+          box-shadow: 0 12px 28px rgba(37,99,235,0.28) !important;
+        }
+        .mc-history-cta:hover {
+          box-shadow: 0 16px 34px rgba(37,99,235,0.36) !important;
+          filter: brightness(1.07);
+        }
+        .panel, .stat-card {
+          border-color: rgba(148,163,184,0.16) !important;
+          box-shadow: 0 12px 34px rgba(15,23,42,0.055);
+          transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+        }
+        .stat-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 18px 42px rgba(15,23,42,0.09);
+        }
+        .panel-kicker, .eyebrow { letter-spacing: .115em; }
+        input, textarea, select { transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+        input:focus, textarea:focus, select:focus {
+          outline: none;
+          border-color: rgba(37,99,235,0.55) !important;
+          box-shadow: 0 0 0 4px rgba(37,99,235,0.10) !important;
+        }
+        .status-badge { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.30); }
         @media (max-width: 760px) {
           .app-shell { display: block !important; min-height: 100vh; }
           .sidebar { display: none !important; }
@@ -4058,17 +4143,19 @@ function App() {
             left: 10px; right: 10px; bottom: 10px;
             z-index: 1000;
             padding: 7px;
-            border-radius: 16px;
-            background: var(--surface, #ffffff);
-            border: 1px solid var(--border, rgba(100,120,150,0.18));
-            box-shadow: 0 14px 40px rgba(15,23,42,0.20);
+            border-radius: 18px;
+            background: color-mix(in srgb, var(--surface, #ffffff) 90%, transparent);
+            border: 1px solid rgba(148,163,184,0.18);
+            box-shadow: 0 16px 46px rgba(15,23,42,0.20);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
           }
           .mc-mobile-nav button {
             border: 0; background: transparent; color: inherit; cursor: pointer;
             padding: 8px 4px; border-radius: 10px; font-size: 10px; font-weight: 800;
             display: grid; gap: 3px; place-items: center;
           }
-          .mc-mobile-nav button.active { background: rgba(37,99,235,0.10); color: #2563eb; }
+          .mc-mobile-nav button.active { background: linear-gradient(145deg,rgba(37,99,235,0.14),rgba(14,165,233,0.08)); color: #2563eb; box-shadow: inset 0 0 0 1px rgba(37,99,235,0.08); transform: translateY(-1px); }
         }
         @media (max-width: 420px) {
           .stat-grid { grid-template-columns: 1fr !important; }
@@ -4742,7 +4829,7 @@ function DashboardPage(props) {
             </button>
 
             <button
-              className="secondary-button large"
+              className="primary-button large mc-history-cta"
               onClick={
                 props.onOpenHistory
               }
@@ -6698,7 +6785,13 @@ function CameraModal(props) {
   var [cameraMessage, setCameraMessage] = useState("");
   var [captureBusy, setCaptureBusy] = useState(false);
 
-  var selectedSide = props.selectedSide === "back" ? "back" : "front";
+  var requestedSide = String(props.selectedSide || "front").trim().toLowerCase();
+  var selectedSide = PACKAGE_PANELS.some(function (panel) {
+    return panel.key === requestedSide;
+  })
+    ? requestedSide
+    : "front";
+  var selectedSideLabel = getPanelLabel(selectedSide);
 
   function stopLocalCamera() {
     var stream = streamRef.current;
@@ -7085,7 +7178,7 @@ function CameraModal(props) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={"Capture " + selectedSide + " package photo"}
+      aria-label={"Capture " + selectedSideLabel + " package photo"}
       style={{
         position: "fixed",
         inset: 0,
@@ -7122,7 +7215,7 @@ function CameraModal(props) {
           <div>
             <span className="panel-kicker">LIVE CAMERA</span>
             <h2 style={{ margin: "4px 0 0", fontSize: "20px" }}>
-              Capture {selectedSide === "front" ? "front" : "back"} side
+              Capture {selectedSideLabel}
             </h2>
           </div>
 
@@ -8030,50 +8123,188 @@ function AboutPage() {
 }
 
 function ConsumerQuickCheck(props) {
-  var [images, setImages] = useState([]);
+  var [source, setSource] = useState("PACKAGE");
+  var [packageImages, setPackageImages] = useState(function () {
+    return createEmptyPackageImages();
+  });
+  var [listingImages, setListingImages] = useState([]);
   var [listingText, setListingText] = useState("");
+  var [cameraOpen, setCameraOpen] = useState(false);
+  var [cameraPanel, setCameraPanel] = useState("front");
   var [busy, setBusy] = useState(false);
   var [progress, setProgress] = useState(0);
   var [fields, setFields] = useState(Object.assign({}, EMPTY_FIELDS));
+  var [fieldPanels, setFieldPanels] = useState({});
   var [results, setResults] = useState([]);
   var [ocrConfidence, setOCRConfidence] = useState(null);
   var [error, setError] = useState("");
 
-  function addImages(fileList) {
-    var selected = Array.from(fileList || []).filter(function (file) {
-      return String(file.type || "").startsWith("image/");
-    }).slice(0, 8);
+  var consumerFields = [
+    ["productName", "Product name", "What the product is"],
+    ["netQuantity", "Net quantity", "Weight, volume or count"],
+    ["mrp", "MRP", "Maximum retail price"],
+    ["manufacturer", "Manufacturer / Packer", "Responsible business details"],
+    ["manufactureDate", "Packed / Mfg date", "Date declaration"],
+    ["bestBefore", "Best before / Expiry", "Shelf-life information"],
+    ["consumerCare", "Consumer care", "Complaint / contact details"],
+    ["countryOfOrigin", "Country of origin", "Relevant for imported goods"],
+  ];
 
-    if (!selected.length) return;
+  function revokePreview(item) {
+    if (item && item.preview && String(item.preview).startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(item.preview);
+      } catch (_error) {}
+    }
+  }
 
-    setImages(function (previous) {
-      return previous.concat(selected.map(function (file, index) {
-        return {
-          id: file.name + "-" + file.lastModified + "-" + index + "-" + Math.random(),
-          file: file,
-          preview: URL.createObjectURL(file),
-        };
-      })).slice(0, 8);
+  function makeImageItem(file, panelKey) {
+    return {
+      id:
+        String(panelKey || "image") +
+        "-" +
+        String(file && file.name ? file.name : "capture") +
+        "-" +
+        Date.now() +
+        "-" +
+        Math.random(),
+      file: file,
+      preview: URL.createObjectURL(file),
+      panel: panelKey || "",
+    };
+  }
+
+  function setPanelImage(file, panelKey) {
+    if (!file) return;
+
+    var validPanel = PACKAGE_PANELS.some(function (panel) {
+      return panel.key === panelKey;
     });
+
+    var targetPanel = validPanel ? panelKey : "front";
+
+    setPackageImages(function (previous) {
+      var next = Object.assign({}, previous || createEmptyPackageImages());
+      revokePreview(next[targetPanel]);
+      next[targetPanel] = makeImageItem(file, targetPanel);
+      return next;
+    });
+
     setResults([]);
     setFields(Object.assign({}, EMPTY_FIELDS));
+    setFieldPanels({});
     setError("");
   }
 
-  function removeImage(id) {
-    setImages(function (previous) {
+  function removePanelImage(panelKey) {
+    setPackageImages(function (previous) {
+      var next = Object.assign({}, previous || createEmptyPackageImages());
+      revokePreview(next[panelKey]);
+      next[panelKey] = null;
+      return next;
+    });
+
+    setResults([]);
+    setFields(Object.assign({}, EMPTY_FIELDS));
+    setFieldPanels({});
+  }
+
+  function openConsumerCamera(panelKey) {
+    setCameraPanel(panelKey || "front");
+    setCameraOpen(true);
+    setError("");
+  }
+
+  function handleConsumerCapture(file, panelKey) {
+    setPanelImage(file, panelKey || cameraPanel);
+    setCameraOpen(false);
+  }
+
+  function addListingImages(fileList) {
+    var selected = Array.from(fileList || [])
+      .filter(function (file) {
+        return String(file.type || "").startsWith("image/");
+      })
+      .slice(0, Math.max(0, 6 - listingImages.length));
+
+    if (!selected.length) return;
+
+    setListingImages(function (previous) {
+      return previous
+        .concat(
+          selected.map(function (file, index) {
+            return makeImageItem(file, "listing-" + String(previous.length + index + 1));
+          })
+        )
+        .slice(0, 6);
+    });
+
+    setResults([]);
+    setFields(Object.assign({}, EMPTY_FIELDS));
+    setFieldPanels({});
+    setError("");
+  }
+
+  function removeListingImage(id) {
+    setListingImages(function (previous) {
       return previous.filter(function (item) {
-        if (item.id === id && item.preview && item.preview.startsWith("blob:")) {
-          try { URL.revokeObjectURL(item.preview); } catch (_error) {}
-        }
+        if (item.id === id) revokePreview(item);
         return item.id !== id;
       });
     });
+    setResults([]);
+    setFields(Object.assign({}, EMPTY_FIELDS));
+    setFieldPanels({});
+  }
+
+  function resetConsumerCheck() {
+    PACKAGE_PANELS.forEach(function (panel) {
+      revokePreview(packageImages && packageImages[panel.key]);
+    });
+    listingImages.forEach(revokePreview);
+
+    setPackageImages(createEmptyPackageImages());
+    setListingImages([]);
+    setListingText("");
+    setFields(Object.assign({}, EMPTY_FIELDS));
+    setFieldPanels({});
+    setResults([]);
+    setOCRConfidence(null);
+    setError("");
+    setProgress(0);
+    setSource("PACKAGE");
+    setCameraOpen(false);
+    setCameraPanel("front");
   }
 
   async function analyze() {
-    if (!images.length && !normalizeText(listingText)) {
-      setError("Add at least one package photo or paste product-listing information.");
+    var packageEntries = PACKAGE_PANELS.map(function (panel) {
+      return {
+        side: panel.key,
+        label: panel.label,
+        item: packageImages && packageImages[panel.key],
+      };
+    }).filter(function (entry) {
+      return Boolean(entry.item && entry.item.preview);
+    });
+
+    var listingEntries = listingImages.map(function (item, index) {
+      return {
+        side: "listing-" + String(index + 1),
+        label: "Online listing screenshot " + String(index + 1),
+        item: item,
+      };
+    });
+
+    var imagesToScan = source === "PACKAGE" ? packageEntries : listingEntries;
+    var hasListingText = source === "ONLINE" && normalizeText(listingText).length > 0;
+
+    if (!imagesToScan.length && !hasListingText) {
+      setError(
+        source === "ONLINE"
+          ? "Upload a listing screenshot or paste the visible product information."
+          : "Capture or upload at least one package panel first."
+      );
       return;
     }
 
@@ -8083,150 +8314,667 @@ function ConsumerQuickCheck(props) {
     var worker = null;
 
     try {
-      var combined = [];
+      var combinedText = [];
       var confidences = [];
-      worker = images.length ? await createWorker("eng") : null;
+      var mergedFields = Object.assign({}, EMPTY_FIELDS);
+      var nextFieldPanels = {};
 
-      for (var index = 0; index < images.length; index += 1) {
-        setProgress(Math.min(85, 10 + Math.round((index / Math.max(1, images.length)) * 70)));
-        var prepared = await prepareImageForOCR(images[index].file);
-        var response = await worker.recognize(prepared);
-        var text = normalizeText(response && response.data ? response.data.text : "");
-        if (text) combined.push(text);
-        var confidence = getOCRConfidence(response);
-        if (confidence !== null) confidences.push(confidence);
+      if (imagesToScan.length) {
+        worker = await createWorker("eng");
       }
 
-      if (normalizeText(listingText)) combined.push(normalizeText(listingText));
-      var extracted = extractFields(combined.join("\n\n"));
-      var screening = runCompliance(extracted, "", "g");
+      for (var index = 0; index < imagesToScan.length; index += 1) {
+        var entry = imagesToScan[index];
 
-      setFields(extracted);
+        setProgress(
+          Math.min(
+            86,
+            12 + Math.round((index / Math.max(1, imagesToScan.length)) * 70)
+          )
+        );
+
+        var sourceForOCR = entry.item.file || entry.item.preview;
+        var prepared = await prepareImageForOCR(sourceForOCR);
+        var response = await worker.recognize(prepared);
+        var text = normalizeText(
+          response && response.data ? response.data.text : ""
+        );
+
+        if (text) {
+          combinedText.push("===== " + entry.label.toUpperCase() + " =====\n" + text);
+          var sideFields = extractFields(text);
+
+          Object.keys(sideFields).forEach(function (key) {
+            var value = String(sideFields[key] || "").trim();
+            if (!value || String(mergedFields[key] || "").trim()) return;
+            mergedFields[key] = sideFields[key];
+            nextFieldPanels[key] = entry.label;
+          });
+        }
+
+        var confidence = getOCRConfidence(response);
+        if (confidence !== null && confidence !== undefined) {
+          confidences.push(Number(confidence));
+        }
+      }
+
+      if (hasListingText) {
+        var cleanListing = normalizeText(listingText);
+        combinedText.push("===== ONLINE LISTING TEXT =====\n" + cleanListing);
+        var listingFields = extractFields(cleanListing);
+
+        Object.keys(listingFields).forEach(function (key) {
+          var value = String(listingFields[key] || "").trim();
+          if (!value || String(mergedFields[key] || "").trim()) return;
+          mergedFields[key] = listingFields[key];
+          nextFieldPanels[key] = "Online listing text";
+        });
+      }
+
+      if (!Object.keys(mergedFields).some(function (key) {
+        return String(mergedFields[key] || "").trim();
+      })) {
+        mergedFields = extractFields(combinedText.join("\n\n"));
+      }
+
+      setProgress(92);
+
+      var screening = runCompliance(mergedFields, "", "g");
+
+      setFields(mergedFields);
+      setFieldPanels(nextFieldPanels);
       setResults(screening);
-      setOCRConfidence(confidences.length
-        ? Math.round(confidences.reduce(function (sum, value) { return sum + value; }, 0) / confidences.length)
-        : null);
+      setOCRConfidence(
+        confidences.length
+          ? Math.round(
+              confidences.reduce(function (sum, value) {
+                return sum + value;
+              }, 0) / confidences.length
+            )
+          : null
+      );
       setProgress(100);
     } catch (consumerError) {
       console.error("MetroCheck consumer OCR failed:", consumerError);
-      setError("The image could not be analyzed. Try a clearer photo or paste the visible package declarations.");
+      setError(
+        "We could not read this clearly. Try a brighter, straight-on photo with the label filling most of the frame."
+      );
     } finally {
       if (worker) {
-        try { await worker.terminate(); } catch (_error) {}
+        try {
+          await worker.terminate();
+        } catch (_error) {}
       }
       setBusy(false);
     }
   }
 
-  var applicable = results.filter(function (item) { return item.status !== "NOT APPLICABLE"; });
-  var passed = applicable.filter(function (item) { return item.status === "PASS"; }).length;
-  var status = results.length ? overallStatus(results) : "NOT CHECKED";
+  var capturedPanels = getCapturedPanelKeys(packageImages);
+  var applicable = results.filter(function (item) {
+    return item.status !== "NOT APPLICABLE";
+  });
+  var passed = applicable.filter(function (item) {
+    return item.status === "PASS";
+  }).length;
+  var score = applicable.length
+    ? Math.round((passed / applicable.length) * 100)
+    : 0;
+  var foundFields = consumerFields.filter(function (item) {
+    return Boolean(String(fields[item[0]] || "").trim());
+  }).length;
+  var needsAttention = consumerFields.filter(function (item) {
+    return !String(fields[item[0]] || "").trim();
+  });
 
-  var pageStyle = {
-    minHeight: "100vh",
-    padding: "18px",
-    background: props.darkMode ? "#07101d" : "#f3f6fb",
-    color: props.darkMode ? "#f8fbff" : "#102033",
-  };
-  var cardStyle = {
-    background: props.darkMode ? "#0d1928" : "#ffffff",
-    border: "1px solid " + (props.darkMode ? "#25384e" : "#dfe7f1"),
-    borderRadius: "18px",
-    padding: "18px",
-  };
+  var resultHeadline =
+    score >= 90 && needsAttention.length <= 1
+      ? "Package details look complete"
+      : score >= 65
+      ? "A few details need your attention"
+      : "Several package details were not found";
+
+  var resultText =
+    score >= 90 && needsAttention.length <= 1
+      ? "MetroCheck found most of the important declarations consumers normally look for."
+      : "This does not automatically mean the product is illegal. Check the package manually or ask an inspector if something important is missing.";
+
+  var consumerBg = props.darkMode ? "#07111f" : "#f4f7fb";
+  var consumerSurface = props.darkMode ? "#0d1a2b" : "#ffffff";
+  var consumerSoft = props.darkMode ? "#12233a" : "#f3f7ff";
+  var consumerText = props.darkMode ? "#f8fbff" : "#102033";
+  var consumerMuted = props.darkMode ? "#9fb0c4" : "#64748b";
+  var consumerBorder = props.darkMode ? "#233a55" : "#dce6f2";
 
   return (
-    <div style={pageStyle}>
-      <div style={{ width: "min(900px, 100%)", margin: "0 auto" }}>
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
-          <button type="button" className="secondary-button" onClick={props.onBack}>← Back to access</button>
-          <button type="button" className="secondary-button" onClick={props.onToggleDarkMode}>{props.darkMode ? "☀ Light" : "☾ Dark"}</button>
-        </header>
+    <div
+      className="mc-consumer-page"
+      style={{
+        minHeight: "100vh",
+        background: consumerBg,
+        color: consumerText,
+      }}
+    >
+      <style>{`
+        .mc-consumer-page, .mc-consumer-page * { box-sizing: border-box; }
+        .mc-consumer-page {
+          background-image:
+            radial-gradient(circle at 90% 0%, rgba(37,99,235,.11), transparent 26%),
+            radial-gradient(circle at 5% 45%, rgba(14,165,233,.07), transparent 25%);
+        }
+        .mc-consumer-shell { width: min(1160px, 100%); margin: 0 auto; padding: 18px; }
+        .mc-consumer-topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+        .mc-consumer-brand { display:flex; align-items:center; gap:10px; min-width:0; }
+        .mc-consumer-logo { width:42px; height:42px; border-radius:13px; display:grid; place-items:center; color:white; font-weight:900; background:linear-gradient(145deg,#2563eb,#0f56d9); box-shadow:0 10px 26px rgba(37,99,235,.24); }
+        .mc-consumer-brand strong { display:block; font-size:15px; letter-spacing:.08em; }
+        .mc-consumer-brand span { display:block; margin-top:2px; font-size:11px; opacity:.68; }
+        .mc-consumer-top-actions { display:flex; gap:8px; }
+        .mc-consumer-icon-button { min-height:40px; border-radius:12px; border:1px solid ${consumerBorder}; background:${consumerSurface}; color:${consumerText}; padding:9px 12px; font-weight:800; cursor:pointer; }
+        .mc-consumer-hero { position:relative; overflow:hidden; padding:28px 30px; border:1px solid ${consumerBorder}; border-radius:26px; background:radial-gradient(circle at 88% 20%,rgba(37,99,235,.16),transparent 24%),linear-gradient(135deg,${consumerSurface} 0%,${consumerSoft} 100%); box-shadow:0 24px 70px rgba(15,23,42,.08); }
+        .mc-consumer-hero::after { content:""; position:absolute; right:-65px; bottom:-85px; width:210px; height:210px; border-radius:50%; border:28px solid rgba(37,99,235,.055); pointer-events:none; }
+        .mc-consumer-eyebrow { display:inline-flex; align-items:center; gap:8px; font-size:10px; font-weight:900; letter-spacing:.13em; text-transform:uppercase; color:#2563eb; }
+        .mc-consumer-hero h1 { margin:8px 0 8px; max-width:760px; font-size:clamp(32px,4.6vw,54px); line-height:1.01; letter-spacing:-.04em; }
+        .mc-consumer-hero p { max-width:760px; margin:0; color:${consumerMuted}; font-size:14px; line-height:1.65; }
+        .mc-consumer-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:18px; }
+        .mc-consumer-step { padding:10px 12px; border-radius:13px; background:${consumerSurface}; border:1px solid ${consumerBorder}; }
+        .mc-consumer-step strong { display:block; font-size:12px; }
+        .mc-consumer-step span { display:block; margin-top:3px; color:${consumerMuted}; font-size:10px; }
+        .mc-consumer-workspace { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr); gap:14px; margin-top:14px; align-items:start; }
+        .mc-consumer-card { border-radius:22px; border:1px solid ${consumerBorder}; background:${consumerSurface}; padding:20px; box-shadow:0 16px 44px rgba(15,23,42,.06); transition:transform .18s ease,box-shadow .18s ease; }
+        .mc-consumer-card:hover { box-shadow:0 20px 52px rgba(15,23,42,.085); }
+        .mc-consumer-card h2, .mc-consumer-card h3 { margin-top:0; }
+        .mc-consumer-source-tabs { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:4px; border-radius:13px; background:${consumerSoft}; margin-bottom:15px; }
+        .mc-consumer-source-tabs button { border:0; border-radius:10px; background:transparent; color:${consumerMuted}; padding:10px; font-weight:900; cursor:pointer; }
+        .mc-consumer-source-tabs button.active { background:${consumerSurface}; color:#2563eb; box-shadow:0 7px 20px rgba(15,23,42,.09),inset 0 0 0 1px rgba(37,99,235,.08); }
+        .mc-consumer-panel-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:14px; }
+        .mc-consumer-panel-card { min-width:0; border:1px solid ${consumerBorder}; border-radius:16px; background:linear-gradient(180deg,${consumerSoft},${consumerSurface}); padding:11px; box-shadow:0 6px 18px rgba(15,23,42,.035); transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease; }
+        .mc-consumer-panel-card:hover { transform:translateY(-2px); border-color:rgba(37,99,235,.28); box-shadow:0 12px 26px rgba(15,23,42,.07); }
+        .mc-consumer-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:9px; }
+        .mc-consumer-panel-head strong { font-size:11px; line-height:1.35; }
+        .mc-consumer-panel-tag { flex:0 0 auto; padding:3px 6px; border-radius:999px; background:${consumerSurface}; color:${consumerMuted}; font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
+        .mc-consumer-panel-tag.required { color:#2563eb; background:rgba(37,99,235,.09); }
+        .mc-consumer-panel-preview { height:132px; display:grid; place-items:center; overflow:hidden; border-radius:11px; background:#07101d; border:1px solid ${consumerBorder}; }
+        .mc-consumer-panel-preview img { width:100%; height:100%; object-fit:contain; }
+        .mc-consumer-panel-empty { height:112px; display:grid; place-items:center; text-align:center; padding:10px; border:1px dashed #95b5e6; border-radius:11px; background:${consumerSurface}; color:${consumerMuted}; font-size:10px; line-height:1.45; }
+        .mc-consumer-panel-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px; }
+        .mc-consumer-panel-button { min-height:39px; display:flex; align-items:center; justify-content:center; gap:6px; border-radius:10px; border:1px solid ${consumerBorder}; background:${consumerSurface}; color:${consumerText}; font-size:10px; font-weight:900; cursor:pointer; text-align:center; transition:transform .17s ease,box-shadow .17s ease,border-color .17s ease; }
+        .mc-consumer-panel-button:hover { transform:translateY(-1px); border-color:rgba(37,99,235,.32); box-shadow:0 7px 18px rgba(15,23,42,.07); }
+        .mc-consumer-panel-button.capture { border-color:transparent; color:#fff; background:linear-gradient(135deg,#2f73ff,#1262e8); box-shadow:0 8px 18px rgba(37,99,235,.18); }
+        .mc-consumer-panel-button.remove { color:#b42318; }
+        .mc-consumer-upload { min-height:165px; display:grid; place-items:center; text-align:center; padding:22px; border:1.5px dashed #8fb3ea; border-radius:16px; background:${consumerSoft}; cursor:pointer; }
+        .mc-consumer-upload-icon { width:50px; height:50px; margin:0 auto 9px; border-radius:15px; display:grid; place-items:center; background:#2563eb; color:white; box-shadow:0 10px 24px rgba(37,99,235,.22); }
+        .mc-consumer-upload strong { display:block; font-size:14px; }
+        .mc-consumer-upload span { display:block; margin-top:5px; color:${consumerMuted}; font-size:11px; line-height:1.5; }
+        .mc-consumer-thumbs { display:flex; gap:8px; overflow-x:auto; padding:2px 0 5px; margin-top:10px; }
+        .mc-consumer-thumb { position:relative; flex:0 0 108px; height:108px; overflow:hidden; border-radius:12px; background:#07101d; border:1px solid ${consumerBorder}; }
+        .mc-consumer-thumb img { width:100%; height:100%; object-fit:contain; }
+        .mc-consumer-thumb button { position:absolute; top:6px; right:6px; width:27px; height:27px; border:0; border-radius:999px; background:rgba(255,255,255,.92); color:#0f172a; font-weight:900; cursor:pointer; }
+        .mc-consumer-textarea { width:100%; min-height:140px; resize:vertical; margin-top:10px; border:1px solid ${consumerBorder}; border-radius:13px; padding:12px; background:${props.darkMode ? "#101d2e" : "#fbfdff"}; color:${consumerText}; font:inherit; line-height:1.5; }
+        .mc-consumer-primary { width:100%; min-height:52px; margin-top:14px; border:0; border-radius:14px; background:linear-gradient(135deg,#2f73ff,#0f59da 62%,#0ea5e9); color:white; font-weight:900; font-size:13px; cursor:pointer; box-shadow:0 14px 30px rgba(37,99,235,.25); transition:transform .18s ease,box-shadow .18s ease; }
+        .mc-consumer-primary:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 18px 38px rgba(37,99,235,.30); }
+        .mc-consumer-primary:disabled { opacity:.65; cursor:wait; }
+        .mc-consumer-helper { display:grid; gap:9px; }
+        .mc-consumer-tip { padding:12px; border:1px solid ${consumerBorder}; border-radius:13px; background:${consumerSoft}; }
+        .mc-consumer-tip strong { display:block; font-size:11px; }
+        .mc-consumer-tip span { display:block; margin-top:4px; color:${consumerMuted}; font-size:10px; line-height:1.5; }
+        .mc-consumer-result { margin-top:14px; }
+        .mc-consumer-result-top { display:grid; grid-template-columns:108px 1fr; gap:16px; align-items:center; }
+        .mc-consumer-score { width:100px; height:100px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(#22a06b ${score}%,${consumerBorder} 0); position:relative; }
+        .mc-consumer-score::after { content:''; position:absolute; inset:9px; border-radius:50%; background:${consumerSurface}; }
+        .mc-consumer-score div { position:relative; z-index:1; text-align:center; }
+        .mc-consumer-score strong { display:block; font-size:25px; }
+        .mc-consumer-score span { display:block; font-size:8px; color:${consumerMuted}; font-weight:800; text-transform:uppercase; }
+        .mc-consumer-result-copy h2 { margin:0 0 6px; font-size:23px; }
+        .mc-consumer-result-copy p { margin:0; color:${consumerMuted}; line-height:1.6; }
+        .mc-consumer-field-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:16px; }
+        .mc-consumer-field-card { display:grid; grid-template-columns:28px 1fr; gap:9px; padding:11px; border:1px solid ${consumerBorder}; border-radius:13px; }
+        .mc-consumer-field-state { width:28px; height:28px; border-radius:999px; display:grid; place-items:center; font-size:12px; font-weight:900; }
+        .mc-consumer-field-card.found .mc-consumer-field-state { background:rgba(34,160,107,.12); color:#15915d; }
+        .mc-consumer-field-card.missing .mc-consumer-field-state { background:rgba(245,158,11,.13); color:#c57b00; }
+        .mc-consumer-field-card strong { display:block; font-size:11px; }
+        .mc-consumer-field-card span { display:block; margin-top:3px; color:${consumerMuted}; font-size:10px; line-height:1.4; word-break:break-word; }
+        .mc-consumer-field-source { color:#2563eb !important; font-weight:800; }
+        .mc-consumer-details { margin-top:13px; border-top:1px solid ${consumerBorder}; padding-top:13px; }
+        .mc-consumer-details summary { cursor:pointer; font-weight:900; color:#2563eb; }
+        .mc-consumer-rule { padding:9px 0; border-bottom:1px solid ${consumerBorder}; }
+        .mc-consumer-rule:last-child { border-bottom:0; }
+        .mc-consumer-rule strong { font-size:11px; }
+        .mc-consumer-rule span { display:block; margin-top:3px; color:${consumerMuted}; font-size:10px; line-height:1.45; }
+        .mc-consumer-disclaimer { margin-top:13px; padding:11px 13px; border-radius:12px; background:${consumerSoft}; color:${consumerMuted}; font-size:10px; line-height:1.55; }
+        .mc-consumer-error { margin-top:11px; padding:11px 12px; border-radius:11px; border:1px solid rgba(220,38,38,.25); background:rgba(220,38,38,.07); color:${props.darkMode ? "#fecaca" : "#b91c1c"}; font-size:11px; font-weight:700; }
+        @media (max-width:760px) {
+          .mc-consumer-shell { padding:10px; }
+          .mc-consumer-topbar { margin-bottom:10px; position:sticky; top:0; z-index:20; padding:5px 0; background:${consumerBg}; }
+          .mc-consumer-brand span { display:none; }
+          .mc-consumer-icon-button { font-size:0; width:40px; padding:0; }
+          .mc-consumer-icon-button::first-letter { font-size:15px; }
+          .mc-consumer-hero { padding:17px 15px; border-radius:18px; }
+          .mc-consumer-hero h1 { font-size:clamp(28px,8.8vw,39px); }
+          .mc-consumer-hero p { font-size:12px; }
+          .mc-consumer-steps { grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; margin-top:13px; }
+          .mc-consumer-step { padding:8px; }
+          .mc-consumer-step span { display:none; }
+          .mc-consumer-workspace { grid-template-columns:1fr; gap:10px; margin-top:10px; }
+          .mc-consumer-helper-card { display:none; }
+          .mc-consumer-card { padding:13px; border-radius:16px; }
+          .mc-consumer-panel-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+          .mc-consumer-panel-card { padding:8px; border-radius:12px; }
+          .mc-consumer-panel-head strong { font-size:9.5px; }
+          .mc-consumer-panel-tag { font-size:7px; }
+          .mc-consumer-panel-preview, .mc-consumer-panel-empty { height:96px; }
+          .mc-consumer-panel-actions { grid-template-columns:1fr; gap:5px; }
+          .mc-consumer-panel-button { min-height:34px; font-size:9px; }
+          .mc-consumer-result-top { grid-template-columns:78px 1fr; gap:11px; }
+          .mc-consumer-score { width:74px; height:74px; }
+          .mc-consumer-score strong { font-size:20px; }
+          .mc-consumer-result-copy h2 { font-size:18px; }
+          .mc-consumer-field-grid { grid-template-columns:1fr; }
+        }
+        @media (max-width:360px) {
+          .mc-consumer-shell { padding:7px; }
+          .mc-consumer-panel-grid { grid-template-columns:1fr; }
+        }
+      `}</style>
 
-        <section style={{ ...cardStyle, marginBottom: "14px" }}>
-          <span className="panel-kicker">CONSUMER QUICK CHECK</span>
-          <h1 style={{ margin: "8px 0 8px", fontSize: "clamp(28px, 7vw, 46px)", lineHeight: 1.04 }}>Check package declarations before you buy.</h1>
-          <p style={{ margin: 0, opacity: 0.72, lineHeight: 1.65 }}>
-            Upload clear package photos or a product-listing screenshot. MetroCheck screens visible declarations and highlights anything that may need attention.
-          </p>
-        </section>
-
-        <section style={{ ...cardStyle, marginBottom: "14px" }}>
-          <h3 style={{ marginTop: 0 }}>1. Add package photos</h3>
-          <label className="upload-zone" style={{ display: "grid", placeItems: "center", minHeight: "120px", cursor: "pointer", textAlign: "center" }}>
-            <input type="file" accept="image/*" multiple capture="environment" onChange={function (event) { addImages(event.target.files); event.target.value = ""; }} />
-            <span><strong>Capture or upload package sides</strong><br /><small>Front first, then add any side containing declarations. Up to 8 images.</small></span>
-          </label>
-
-          {images.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "10px", marginTop: "12px" }}>
-              {images.map(function (item, index) {
-                return (
-                  <div key={item.id} style={{ position: "relative", borderRadius: "12px", overflow: "hidden", minHeight: "130px", background: "#050b14" }}>
-                    <img src={item.preview} alt={"Consumer package view " + (index + 1)} style={{ width: "100%", height: "150px", objectFit: "contain" }} />
-                    <button type="button" onClick={function () { removeImage(item.id); }} style={{ position: "absolute", top: "7px", right: "7px", border: 0, borderRadius: "999px", width: "28px", height: "28px", cursor: "pointer" }}>×</button>
-                  </div>
-                );
-              })}
+      <div className="mc-consumer-shell">
+        <header className="mc-consumer-topbar">
+          <div className="mc-consumer-brand">
+            <div className="mc-consumer-logo">MC</div>
+            <div>
+              <strong>METROCHECK</strong>
+              <span>Consumer package check</span>
             </div>
-          )}
-
-          <div className="field" style={{ marginTop: "14px" }}>
-            <label>Optional e-commerce listing text</label>
-            <textarea rows={4} value={listingText} onChange={function (event) { setListingText(event.target.value); }} placeholder="Paste visible title, MRP, net quantity, manufacturer/importer, origin, consumer care, dates, etc." />
           </div>
 
-          <button type="button" className="primary-button large" disabled={busy} onClick={analyze} style={{ width: "100%", marginTop: "14px", justifyContent: "center" }}>
-            {busy ? "Analyzing… " + progress + "%" : "Run Consumer Check"}
-          </button>
-          {error && <div className="error-box" style={{ marginTop: "12px" }}>{error}</div>}
+          <div className="mc-consumer-top-actions">
+            <button
+              type="button"
+              className="mc-consumer-icon-button"
+              onClick={props.onToggleDarkMode}
+              aria-label="Toggle theme"
+              title="Toggle theme"
+            >
+              {props.darkMode ? "☀ Light" : "☾ Dark"}
+            </button>
+            <button
+              type="button"
+              className="mc-consumer-icon-button"
+              onClick={props.onBack}
+              aria-label="Account access"
+              title="Account access"
+            >
+              ← Account access
+            </button>
+          </div>
+        </header>
+
+        <section className="mc-consumer-hero">
+          <div className="mc-consumer-eyebrow">Consumer quick check · No login needed</div>
+          <h1>One package. Every visible declaration. One clear check.</h1>
+          <p>
+            Capture or upload the front, back, left, right, top and bottom panels
+            as needed. MetroCheck combines visible declarations across the pack and
+            turns them into a simple, easy-to-understand consumer screening result.
+          </p>
+
+          <div className="mc-consumer-steps">
+            <div className="mc-consumer-step">
+              <strong>1 · Capture</strong>
+              <span>Add the package panels you can see</span>
+            </div>
+            <div className="mc-consumer-step">
+              <strong>2 · Check</strong>
+              <span>OCR reads declarations across panels</span>
+            </div>
+            <div className="mc-consumer-step">
+              <strong>3 · Understand</strong>
+              <span>See simple found / review results</span>
+            </div>
+          </div>
         </section>
 
-        {results.length > 0 && (
-          <section style={cardStyle}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start", flexWrap: "wrap" }}>
-              <div>
-                <span className="panel-kicker">SCREENING RESULT</span>
-                <h2 style={{ margin: "7px 0 4px" }}>{status === "COMPLIANT" ? "Declarations look complete" : "Some declarations need attention"}</h2>
-                <p style={{ margin: 0, opacity: 0.7 }}>{passed} of {applicable.length} applicable checks passed{ocrConfidence !== null ? " • OCR " + ocrConfidence + "%" : ""}.</p>
+        <div className="mc-consumer-workspace">
+          <section className="mc-consumer-card">
+            <div
+              className="mc-consumer-source-tabs"
+              role="tablist"
+              aria-label="Consumer check source"
+            >
+              <button
+                type="button"
+                className={source === "PACKAGE" ? "active" : ""}
+                onClick={function () {
+                  setSource("PACKAGE");
+                  setError("");
+                }}
+              >
+                📦 Physical package
+              </button>
+              <button
+                type="button"
+                className={source === "ONLINE" ? "active" : ""}
+                onClick={function () {
+                  setSource("ONLINE");
+                  setError("");
+                }}
+              >
+                🛒 Online listing
+              </button>
+            </div>
+
+            {source === "PACKAGE" ? (
+              <>
+                <h2 style={{ marginBottom: "5px" }}>Add package panels</h2>
+                <p
+                  style={{
+                    margin: "0",
+                    color: consumerMuted,
+                    fontSize: "11px",
+                    lineHeight: 1.55,
+                  }}
+                >
+                  Front / principal panel is recommended first. The other panels are
+                  optional — add whichever sides contain declarations.
+                </p>
+
+                <div className="mc-consumer-panel-grid">
+                  {PACKAGE_PANELS.map(function (panel) {
+                    var item = packageImages && packageImages[panel.key];
+
+                    return (
+                      <div className="mc-consumer-panel-card" key={panel.key}>
+                        <div className="mc-consumer-panel-head">
+                          <strong>{panel.label}</strong>
+                          <span
+                            className={
+                              "mc-consumer-panel-tag" +
+                              (panel.required ? " required" : "")
+                            }
+                          >
+                            {panel.required ? "Recommended" : "Optional"}
+                          </span>
+                        </div>
+
+                        {item && item.preview ? (
+                          <div className="mc-consumer-panel-preview">
+                            <img src={item.preview} alt={panel.label + " preview"} />
+                          </div>
+                        ) : (
+                          <div className="mc-consumer-panel-empty">
+                            <div>
+                              <Icon name="camera" size={21} />
+                              <div style={{ marginTop: "5px", fontWeight: 800 }}>
+                                No photo yet
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="mc-consumer-panel-actions">
+                          <label className="mc-consumer-panel-button">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              style={{ display: "none" }}
+                              onChange={function (event) {
+                                var file = event.target.files && event.target.files[0];
+                                event.target.value = "";
+                                if (file) setPanelImage(file, panel.key);
+                              }}
+                            />
+                            <Icon name="upload" size={14} />
+                            {item ? "Replace" : "Upload"}
+                          </label>
+
+                          <button
+                            type="button"
+                            className="mc-consumer-panel-button capture"
+                            onClick={function () {
+                              openConsumerCamera(panel.key);
+                            }}
+                          >
+                            <Icon name="camera" size={14} />
+                            Capture
+                          </button>
+                        </div>
+
+                        {item && (
+                          <button
+                            type="button"
+                            className="mc-consumer-panel-button remove"
+                            onClick={function () {
+                              removePanelImage(panel.key);
+                            }}
+                            style={{ width: "100%", marginTop: "6px" }}
+                          >
+                            Remove photo
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 style={{ marginBottom: "5px" }}>Check an online product listing</h2>
+                <p
+                  style={{
+                    margin: "0 0 12px",
+                    color: consumerMuted,
+                    fontSize: "11px",
+                    lineHeight: 1.55,
+                  }}
+                >
+                  Upload screenshots of the listing or paste the visible product
+                  information. This checks the displayed declarations, not the actual
+                  contents of the physical pack.
+                </p>
+
+                <label className="mc-consumer-upload">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={function (event) {
+                      addListingImages(event.target.files);
+                      event.target.value = "";
+                    }}
+                  />
+                  <div>
+                    <div className="mc-consumer-upload-icon">
+                      <Icon name="upload" size={23} />
+                    </div>
+                    <strong>
+                      {listingImages.length
+                        ? "Add another listing screenshot"
+                        : "Upload listing screenshot"}
+                    </strong>
+                    <span>You can add up to 6 screenshots.</span>
+                  </div>
+                </label>
+
+                {listingImages.length > 0 && (
+                  <div className="mc-consumer-thumbs" aria-label="Selected listing screenshots">
+                    {listingImages.map(function (item, index) {
+                      return (
+                        <div className="mc-consumer-thumb" key={item.id}>
+                          <img
+                            src={item.preview}
+                            alt={"Listing screenshot " + String(index + 1)}
+                          />
+                          <button
+                            type="button"
+                            onClick={function () {
+                              removeListingImage(item.id);
+                            }}
+                            aria-label="Remove screenshot"
+                            title="Remove screenshot"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <textarea
+                  className="mc-consumer-textarea"
+                  value={listingText}
+                  onChange={function (event) {
+                    setListingText(event.target.value);
+                  }}
+                  placeholder="Optional: paste the product title, MRP, net quantity, manufacturer/importer, country of origin, consumer care, dates and other visible listing details."
+                />
+              </>
+            )}
+
+            <button
+              type="button"
+              className="mc-consumer-primary"
+              disabled={busy}
+              onClick={analyze}
+            >
+              {busy
+                ? "Reading… " + progress + "%"
+                : source === "PACKAGE"
+                ? "Check captured package"
+                : "Check online listing"}
+            </button>
+
+            {error && <div className="mc-consumer-error">{error}</div>}
+          </section>
+
+          <aside className="mc-consumer-card mc-consumer-helper-card">
+            <h3 style={{ marginBottom: "11px" }}>Capture status</h3>
+            <div className="mc-consumer-helper">
+              <div className="mc-consumer-tip">
+                <strong>{capturedPanels.length} package panel(s) ready</strong>
+                <span>
+                  {capturedPanels.length
+                    ? capturedPanels.map(getPanelLabel).join(" · ")
+                    : "Start with the front / principal panel."}
+                </span>
               </div>
-              <StatusBadge status={status} />
+              <div className="mc-consumer-tip">
+                <strong>Use camera or upload</strong>
+                <span>Every panel has both options, just like the inspector workspace.</span>
+              </div>
+              <div className="mc-consumer-tip">
+                <strong>Avoid glare</strong>
+                <span>Tilt glossy packs slightly so light does not wash out the text.</span>
+              </div>
+              <div className="mc-consumer-tip">
+                <strong>No quantity guessing</strong>
+                <span>MetroCheck reads the declared quantity; a photo cannot measure the actual contents.</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        {results.length > 0 && (
+          <section className="mc-consumer-card mc-consumer-result">
+            <div className="mc-consumer-result-top">
+              <div
+                className="mc-consumer-score"
+                aria-label={"Package declaration score " + score + " percent"}
+              >
+                <div>
+                  <strong>{score}%</strong>
+                  <span>declaration check</span>
+                </div>
+              </div>
+
+              <div className="mc-consumer-result-copy">
+                <div className="mc-consumer-eyebrow">Your result</div>
+                <h2>{resultHeadline}</h2>
+                <p>
+                  {resultText} {foundFields} of {consumerFields.length} key consumer
+                  details were identified
+                  {ocrConfidence !== null ? " · OCR confidence " + ocrConfidence + "%" : ""}.
+                </p>
+              </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px", marginTop: "16px" }}>
-              {FIELD_CONFIG.map(function (item) {
-                var value = fields[item[0]];
+            <div className="mc-consumer-field-grid">
+              {consumerFields.map(function (item) {
+                var value = String(fields[item[0]] || "").trim();
+                var panel = fieldPanels[item[0]];
+
                 return (
-                  <div key={item[0]} style={{ padding: "11px", borderRadius: "10px", border: "1px solid rgba(100,120,150,0.16)" }}>
-                    <small style={{ opacity: 0.65 }}>{item[1]}</small>
-                    <strong style={{ display: "block", marginTop: "4px" }}>{value || "Not identified"}</strong>
+                  <div
+                    key={item[0]}
+                    className={
+                      "mc-consumer-field-card " + (value ? "found" : "missing")
+                    }
+                  >
+                    <div className="mc-consumer-field-state">
+                      {value ? "✓" : "!"}
+                    </div>
+                    <div>
+                      <strong>{item[1]}</strong>
+                      <span>{value || "Not clearly identified — check the pack"}</span>
+                      {value && panel && (
+                        <span className="mc-consumer-field-source">Source: {panel}</span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            <div style={{ display: "grid", gap: "8px", marginTop: "16px" }}>
-              {results.map(function (rule) {
-                return (
-                  <div key={rule.id} style={{ padding: "11px 12px", borderRadius: "10px", border: "1px solid rgba(100,120,150,0.16)" }}>
-                    <strong>{rule.status === "PASS" ? "✓ " : rule.status === "NOT APPLICABLE" ? "— " : "⚠ "}{rule.title}</strong>
-                    <div style={{ marginTop: "4px", fontSize: "12px", opacity: 0.72, lineHeight: 1.5 }}>{rule.message}</div>
-                  </div>
-                );
-              })}
-            </div>
+            <details className="mc-consumer-details">
+              <summary>View detailed screening notes</summary>
+              <div style={{ marginTop: "10px" }}>
+                {results.map(function (rule) {
+                  return (
+                    <div className="mc-consumer-rule" key={rule.id}>
+                      <strong>
+                        {rule.status === "PASS"
+                          ? "✓ "
+                          : rule.status === "NOT APPLICABLE"
+                          ? "— "
+                          : "⚠ "}
+                        {rule.title}
+                      </strong>
+                      <span>{rule.message}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
 
-            <div className="inspector-note" style={{ marginTop: "14px" }}>
-              <Icon name="info" size={18} />
-              <span>This consumer result is informational screening only. It is not an official Legal Metrology determination or enforcement decision.</span>
+            <button
+              type="button"
+              className="mc-consumer-primary"
+              onClick={resetConsumerCheck}
+              style={{ marginTop: "15px" }}
+            >
+              Check another product
+            </button>
+
+            <div className="mc-consumer-disclaimer">
+              Consumer mode is an informational screening tool. It does not make an
+              official Legal Metrology determination and does not replace an inspector's
+              verification or physical quantity testing.
             </div>
           </section>
         )}
       </div>
+
+      {cameraOpen && (
+        <CameraModal
+          selectedSide={cameraPanel}
+          onClose={function () {
+            setCameraOpen(false);
+          }}
+          onCaptureFile={handleConsumerCapture}
+        />
+      )}
     </div>
   );
 }
-
 function InspectorAuthPage(props) {
   var darkMode = props.darkMode;
   var [mode, setMode] = useState("login");
@@ -8285,6 +9033,27 @@ function InspectorAuthPage(props) {
         .mc-auth-page * {
           box-sizing: border-box;
         }
+
+        .mc-auth-card {
+          backdrop-filter: blur(18px);
+          -webkit-backdrop-filter: blur(18px);
+        }
+        .mc-auth-tab, .mc-auth-primary, .mc-auth-demo, .mc-auth-theme {
+          transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+        }
+        .mc-auth-tab:hover, .mc-auth-demo:hover, .mc-auth-theme:hover { transform: translateY(-1px); }
+        .mc-auth-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(23,105,255,.28); }
+        .mc-auth-activation-note {
+          margin: 0 0 14px;
+          padding: 12px 13px;
+          border: 1px solid rgba(37,99,235,.16);
+          border-radius: 13px;
+          background: linear-gradient(135deg,rgba(37,99,235,.075),rgba(14,165,233,.045));
+          color: var(--mc-auth-muted);
+          font-size: 11px;
+          line-height: 1.55;
+        }
+        .mc-auth-activation-note strong { display:block; margin-bottom:3px; color:var(--mc-auth-text); font-size:11px; }
 
         .mc-auth-page {
           min-height: 100vh;
@@ -9248,13 +10017,13 @@ function InspectorAuthPage(props) {
               <h2>
                 {mode === "login"
                   ? "Welcome back."
-                  : "Activate inspector access."}
+                  : "Activate your inspector account."}
               </h2>
 
               <p className="mc-auth-card-description">
                 {mode === "login"
                   ? "Sign in with the official email linked to your MetroCheck inspector account."
-                  : "First-time access verifies your Inspector ID and registered MetroCheck email before account activation."}
+                  : "First-time activation verifies the Inspector ID and email already approved for you before access is enabled."}
               </p>
 
               <button
@@ -9263,7 +10032,7 @@ function InspectorAuthPage(props) {
                 onClick={props.onConsumerMode}
                 style={{ marginBottom: "14px" }}
               >
-                Consumer Quick Check — no inspector login required
+                Consumer Quick Check
               </button>
 
               <div className="mc-auth-divider">Inspector / Supervisor access</div>
@@ -9307,7 +10076,7 @@ function InspectorAuthPage(props) {
                   role="tab"
                   aria-selected={mode === "register"}
                 >
-                  First-time registration
+                  First-time activation
                 </button>
               </div>
 
@@ -9361,6 +10130,23 @@ function InspectorAuthPage(props) {
                 </form>
               ) : (
                 <form onSubmit={submitRegistration}>
+                  <div
+                    style={{
+                      marginBottom: "14px",
+                      padding: "11px 12px",
+                      borderRadius: "12px",
+                      border: "1px solid rgba(37, 99, 235, 0.20)",
+                      background: "rgba(37, 99, 235, 0.06)",
+                      fontSize: "12px",
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    <strong>Already approved by your department?</strong>
+                    <div style={{ marginTop: "4px" }}>
+                      Use this once to verify your Inspector ID and registered email, then create your MetroCheck password. This does not create a new inspector identity.
+                    </div>
+                  </div>
+
                   <label className="mc-auth-field">
                     MetroCheck Inspector ID
                     <input
@@ -9437,7 +10223,7 @@ function InspectorAuthPage(props) {
                         : undefined
                     }
                   >
-                    Verify & create account
+                    Verify & activate account
                   </button>
                 </form>
               )}

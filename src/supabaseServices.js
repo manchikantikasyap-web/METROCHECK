@@ -12,11 +12,13 @@ function requireSupabase() {
 }
 
 function sanitizeFileName(name) {
-  return String(name || "file")
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 120) || "file";
+  return (
+    String(name || "file")
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 120) || "file"
+  );
 }
 
 function serializableRecord(record) {
@@ -52,15 +54,23 @@ function mapProfile(row) {
 }
 
 function getStorageMetadata(record) {
-  var source = record && typeof record === "object" ? record : {};
+  var source =
+    record && typeof record === "object"
+      ? record
+      : {};
+
   var storage =
-    source._storage && typeof source._storage === "object"
+    source._storage &&
+    typeof source._storage === "object"
       ? source._storage
       : {};
+
   var packageStorage =
-    storage.package && typeof storage.package === "object"
+    storage.package &&
+    typeof storage.package === "object"
       ? storage.package
       : {};
+
   var packagePaths = {};
 
   Object.keys(packageStorage).forEach(function (key) {
@@ -71,10 +81,13 @@ function getStorageMetadata(record) {
 
   return {
     package: packagePaths,
+
     evidence: Array.isArray(source.evidence)
       ? source.evidence
           .map(function (item) {
-            return item && item.storagePath ? String(item.storagePath) : "";
+            return item && item.storagePath
+              ? String(item.storagePath)
+              : "";
           })
           .filter(Boolean)
       : [],
@@ -107,19 +120,27 @@ async function createSignedUrlMap(paths) {
 
   var response = await supabase.storage
     .from(STORAGE_BUCKET)
-    .createSignedUrls(uniquePaths, SIGNED_URL_SECONDS);
+    .createSignedUrls(
+      uniquePaths,
+      SIGNED_URL_SECONDS
+    );
 
   if (response.error) {
     throw response.error;
   }
 
-  (response.data || []).forEach(function (item, index) {
-    var path = item && item.path
-      ? item.path
-      : uniquePaths[index];
+  (response.data || []).forEach(function (
+    item,
+    index
+  ) {
+    var path =
+      item && item.path
+        ? item.path
+        : uniquePaths[index];
 
     var signedUrl =
-      item && (item.signedUrl || item.signedURL)
+      item &&
+      (item.signedUrl || item.signedURL)
         ? item.signedUrl || item.signedURL
         : "";
 
@@ -131,33 +152,57 @@ async function createSignedUrlMap(paths) {
   return result;
 }
 
-function materializeRecord(record, signedUrlMap) {
-  var source = serializableRecord(record || {});
-  var storage = getStorageMetadata(source);
+function materializeRecord(
+  record,
+  signedUrlMap
+) {
+  var source = serializableRecord(
+    record || {}
+  );
+
+  var storage =
+    getStorageMetadata(source);
+
   var packageImages = {};
 
-  Object.keys(storage.package || {}).forEach(function (key) {
-    var path = storage.package[key];
+  Object.keys(
+    storage.package || {}
+  ).forEach(function (key) {
+    var path =
+      storage.package[key];
 
-    packageImages[key] = path
-      ? signedUrlMap.get(path) || ""
-      : "";
+    packageImages[key] =
+      path
+        ? signedUrlMap.get(path) || ""
+        : "";
   });
 
-  var evidence = Array.isArray(source.evidence)
-    ? source.evidence.map(function (item) {
-        if (!item || !item.storagePath) {
-          return item;
-        }
+  var evidence =
+    Array.isArray(source.evidence)
+      ? source.evidence.map(function (
+          item
+        ) {
+          if (
+            !item ||
+            !item.storagePath
+          ) {
+            return item;
+          }
 
-        return Object.assign({}, item, {
-          url:
-            signedUrlMap.get(
-              String(item.storagePath)
-            ) || "",
-        });
-      })
-    : [];
+          return Object.assign(
+            {},
+            item,
+            {
+              url:
+                signedUrlMap.get(
+                  String(
+                    item.storagePath
+                  )
+                ) || "",
+            }
+          );
+        })
+      : [];
 
   var preview =
     packageImages.front ||
@@ -169,11 +214,15 @@ function materializeRecord(record, signedUrlMap) {
       .find(Boolean) ||
     "";
 
-  return Object.assign({}, source, {
-    imagePreview: preview,
-    packageImages: packageImages,
-    evidence: evidence,
-  });
+  return Object.assign(
+    {},
+    source,
+    {
+      imagePreview: preview,
+      packageImages: packageImages,
+      evidence: evidence,
+    }
+  );
 }
 
 async function ensureInspectorProfile(user) {
@@ -183,18 +232,28 @@ async function ensureInspectorProfile(user) {
     );
   }
 
-  var existing = await fetchInspectorProfile(user.id);
+  var existing =
+    await fetchInspectorProfile(
+      user.id
+    );
 
-  if (existing && existing.verified) {
+  if (
+    existing &&
+    existing.verified
+  ) {
     return existing;
   }
 
   var inspectorId = String(
     user.user_metadata &&
-      user.user_metadata.metrocheck_inspector_id
-      ? user.user_metadata.metrocheck_inspector_id
+      user.user_metadata
+        .metrocheck_inspector_id
+      ? user.user_metadata
+          .metrocheck_inspector_id
       : ""
-  ).trim();
+  )
+    .trim()
+    .toUpperCase();
 
   if (!inspectorId) {
     throw new Error(
@@ -202,10 +261,43 @@ async function ensureInspectorProfile(user) {
     );
   }
 
+  var displayName = String(
+    user.user_metadata &&
+      user.user_metadata
+        .metrocheck_display_name
+      ? user.user_metadata
+          .metrocheck_display_name
+      : ""
+  ).trim();
+
+  var office = String(
+    user.user_metadata &&
+      user.user_metadata
+        .metrocheck_office
+      ? user.user_metadata
+          .metrocheck_office
+      : ""
+  ).trim();
+
+  /*
+   * V3 prototype registration:
+   * - existing approved registry identities still work;
+   * - a brand-new prototype Inspector ID/email can also create an INSPECTOR
+   *   profile without requiring the ID to be hard-coded in the React bundle;
+   * - SUPERVISOR / ADMIN roles can only come from an existing approved registry
+   *   row and are never granted by self-registration.
+   */
   var response = await supabase.rpc(
-    "register_inspector_profile",
+    "register_metrocheck_account",
     {
-      p_inspector_id: inspectorId,
+      p_inspector_id:
+        inspectorId,
+
+      p_display_name:
+        displayName || null,
+
+      p_office:
+        office || null,
     }
   );
 
@@ -213,29 +305,45 @@ async function ensureInspectorProfile(user) {
     throw response.error;
   }
 
-  var row = Array.isArray(response.data)
-    ? response.data[0]
-    : response.data;
+  var row =
+    Array.isArray(response.data)
+      ? response.data[0]
+      : response.data;
 
   return mapProfile(row);
 }
 
-export function observeAuthSession(callback) {
-  if (!supabaseReady || !supabase) {
+export function observeAuthSession(
+  callback
+) {
+  if (
+    !supabaseReady ||
+    !supabase
+  ) {
     return function () {};
   }
 
   var active = true;
-  var subscriptionResponse = null;
+
+  var subscriptionResponse =
+    null;
 
   function emit(user) {
-    if (!active || typeof callback !== "function") {
+    if (
+      !active ||
+      typeof callback !==
+        "function"
+    ) {
       return;
     }
 
     try {
       callback(user || null);
     } catch (error) {
+      /*
+       * A consumer callback must not break the Supabase auth listener itself.
+       * The React component logs/handles its own async work separately.
+       */
       console.error(
         "MetroCheck auth-session callback failed:",
         error
@@ -251,7 +359,8 @@ export function observeAuthSession(callback) {
           response &&
             response.data &&
             response.data.session
-            ? response.data.session.user
+            ? response.data
+                .session.user
             : null
         );
       })
@@ -275,8 +384,15 @@ export function observeAuthSession(callback) {
   try {
     subscriptionResponse =
       supabase.auth.onAuthStateChange(
-        function (_event, session) {
-          emit(session ? session.user : null);
+        function (
+          _event,
+          session
+        ) {
+          emit(
+            session
+              ? session.user
+              : null
+          );
         }
       );
   } catch (error) {
@@ -294,8 +410,10 @@ export function observeAuthSession(callback) {
     if (
       subscriptionResponse &&
       subscriptionResponse.data &&
-      subscriptionResponse.data.subscription &&
-      typeof subscriptionResponse.data.subscription
+      subscriptionResponse.data
+        .subscription &&
+      typeof subscriptionResponse
+        .data.subscription
         .unsubscribe === "function"
     ) {
       subscriptionResponse.data.subscription.unsubscribe();
@@ -303,117 +421,267 @@ export function observeAuthSession(callback) {
   };
 }
 
-async function fetchInspectorProfile(uid) {
+async function fetchInspectorProfile(
+  uid
+) {
   requireSupabase();
 
-  var response = await supabase
-    .from("inspectors")
-    .select(
-      "user_id, inspector_id, name, email, department, office, role, verified, verified_at"
-    )
-    .eq("user_id", uid)
-    .maybeSingle();
+  var response =
+    await supabase
+      .from("inspectors")
+      .select(
+        "user_id, inspector_id, name, email, department, office, role, verified, verified_at"
+      )
+      .eq(
+        "user_id",
+        uid
+      )
+      .maybeSingle();
 
   if (response.error) {
     throw response.error;
   }
 
-  return mapProfile(response.data);
+  return mapProfile(
+    response.data
+  );
 }
 
-export async function getInspectorProfile(uid) {
-  var profile = await fetchInspectorProfile(uid);
+export async function getInspectorProfile(
+  uid
+) {
+  requireSupabase();
+
+  var profile =
+    await fetchInspectorProfile(
+      uid
+    );
 
   if (profile) {
     return profile;
   }
 
-  var userResponse = await supabase.auth.getUser();
+  var userResponse =
+    await supabase.auth.getUser();
 
   if (userResponse.error) {
     throw userResponse.error;
   }
 
-  var user = userResponse.data
-    ? userResponse.data.user
-    : null;
+  var user =
+    userResponse.data
+      ? userResponse.data.user
+      : null;
 
-  if (!user || user.id !== uid) {
+  if (
+    !user ||
+    user.id !== uid
+  ) {
     return null;
   }
 
-  var inspectorId = String(
-    user.user_metadata &&
-      user.user_metadata.metrocheck_inspector_id
-      ? user.user_metadata.metrocheck_inspector_id
-      : ""
-  ).trim();
-
-  if (!inspectorId) {
-    return null;
-  }
-
-  var response = await supabase.rpc(
-    "register_inspector_profile",
-    {
-      p_inspector_id: inspectorId,
-    }
+  /*
+   * A previous registration attempt may have created the Supabase Auth user
+   * before its MetroCheck profile existed. Completing the profile here makes
+   * those accounts recoverable simply by signing in with the same password.
+   */
+  return ensureInspectorProfile(
+    user
   );
-
-  if (response.error) {
-    throw response.error;
-  }
-
-  var row = Array.isArray(response.data)
-    ? response.data[0]
-    : response.data;
-
-  return mapProfile(row);
 }
 
 export async function registerInspectorWithSupabase(
-  registryRecord,
+  registration,
   password
 ) {
   requireSupabase();
 
-  var cleanEmail = String(
-    registryRecord && registryRecord.email
-      ? registryRecord.email
-      : ""
-  )
-    .trim()
-    .toLowerCase();
+  var cleanEmail =
+    String(
+      registration &&
+        registration.email
+        ? registration.email
+        : ""
+    )
+      .trim()
+      .toLowerCase();
 
-  var cleanInspectorId = String(
-    registryRecord && registryRecord.id
-      ? registryRecord.id
-      : ""
-  )
-    .trim()
-    .toUpperCase();
+  var cleanInspectorId =
+    String(
+      registration &&
+        registration.id
+        ? registration.id
+        : ""
+    )
+      .trim()
+      .toUpperCase();
 
-  var response = await supabase.auth.signUp({
-    email: cleanEmail,
-    password: password,
-    options: {
-      data: {
-        metrocheck_inspector_id: cleanInspectorId,
+  var cleanDisplayName =
+    String(
+      registration &&
+        registration.name
+        ? registration.name
+        : ""
+    ).trim();
+
+  var cleanOffice =
+    String(
+      registration &&
+        registration.office
+        ? registration.office
+        : ""
+    ).trim();
+
+  if (
+    !cleanEmail ||
+    !cleanInspectorId
+  ) {
+    throw new Error(
+      "Inspector ID and email are required."
+    );
+  }
+
+  if (
+    String(
+      password || ""
+    ).length < 6
+  ) {
+    throw new Error(
+      "Password must contain at least 6 characters."
+    );
+  }
+
+  /*
+   * Check conflicts BEFORE Auth sign-up.
+   * This avoids creating an orphan Auth user
+   * when an Inspector ID is already linked
+   * to somebody else.
+   */
+  var availability =
+    await supabase.rpc(
+      "metrocheck_registration_status",
+      {
+        p_inspector_id:
+          cleanInspectorId,
+
+        p_email:
+          cleanEmail,
+      }
+    );
+
+  if (availability.error) {
+    var availabilityMessage =
+      String(
+        availability.error &&
+          availability.error.message
+          ? availability.error.message
+          : ""
+      );
+
+    if (
+      availabilityMessage
+        .toLowerCase()
+        .includes("function") &&
+      availabilityMessage
+        .toLowerCase()
+        .includes(
+          "metrocheck_registration_status"
+        )
+    ) {
+      throw new Error(
+        "MetroCheck registration database update is missing. Run MetroCheck_Registration_Consumer_Fix.sql once in Supabase SQL Editor."
+      );
+    }
+
+    throw availability.error;
+  }
+
+  var registrationStatus =
+    String(
+      availability.data || ""
+    ).toUpperCase();
+
+  if (
+    registrationStatus ===
+    "EMAIL_ACCOUNT_EXISTS"
+  ) {
+    throw new Error(
+      "This email already has a MetroCheck account. Please use Sign in."
+    );
+  }
+
+  if (
+    registrationStatus ===
+    "INSPECTOR_ID_TAKEN"
+  ) {
+    throw new Error(
+      "This MetroCheck Inspector ID is already linked to another account."
+    );
+  }
+
+  if (
+    registrationStatus ===
+    "EMAIL_REGISTRY_TAKEN"
+  ) {
+    throw new Error(
+      "This email is already linked to a different MetroCheck Inspector ID."
+    );
+  }
+
+  if (
+    registrationStatus ===
+    "INACTIVE"
+  ) {
+    throw new Error(
+      "This MetroCheck Inspector ID is inactive. Contact a supervisor or administrator."
+    );
+  }
+
+  if (
+    registrationStatus !==
+    "AVAILABLE"
+  ) {
+    throw new Error(
+      "MetroCheck could not validate this registration request."
+    );
+  }
+
+  var response =
+    await supabase.auth.signUp({
+      email: cleanEmail,
+
+      password:
+        String(
+          password || ""
+        ),
+
+      options: {
+        data: {
+          metrocheck_inspector_id:
+            cleanInspectorId,
+
+          metrocheck_display_name:
+            cleanDisplayName,
+
+          metrocheck_office:
+            cleanOffice,
+        },
       },
-    },
-  });
+    });
 
   if (response.error) {
     throw response.error;
   }
 
-  var user = response.data
-    ? response.data.user
-    : null;
+  var user =
+    response.data
+      ? response.data.user
+      : null;
 
-  var session = response.data
-    ? response.data.session
-    : null;
+  var session =
+    response.data
+      ? response.data.session
+      : null;
 
   if (!user) {
     throw new Error(
@@ -430,7 +698,10 @@ export async function registerInspectorWithSupabase(
   }
 
   try {
-    var profile = await ensureInspectorProfile(user);
+    var profile =
+      await ensureInspectorProfile(
+        user
+      );
 
     return {
       user: user,
@@ -438,6 +709,12 @@ export async function registerInspectorWithSupabase(
       confirmationRequired: false,
     };
   } catch (error) {
+    /*
+     * Frontend clients cannot delete an Auth user.
+     * Keep the account recoverable:
+     * the next successful sign-in will retry
+     * ensureInspectorProfile().
+     */
     await supabase.auth
       .signOut()
       .catch(function () {});
@@ -454,24 +731,36 @@ export async function loginInspectorWithSupabase(
 
   var response =
     await supabase.auth.signInWithPassword({
-      email: String(email || "")
+      email: String(
+        email || ""
+      )
         .trim()
         .toLowerCase(),
-      password: String(password || ""),
+
+      password: String(
+        password || ""
+      ),
     });
 
   if (response.error) {
     throw response.error;
   }
 
-  var user = response.data
-    ? response.data.user
-    : null;
+  var user =
+    response.data
+      ? response.data.user
+      : null;
 
   try {
-    var profile = await ensureInspectorProfile(user);
+    var profile =
+      await ensureInspectorProfile(
+        user
+      );
 
-    if (!profile || !profile.verified) {
+    if (
+      !profile ||
+      !profile.verified
+    ) {
       throw new Error(
         "This account does not have a verified MetroCheck inspector profile."
       );
@@ -491,8 +780,12 @@ export async function loginInspectorWithSupabase(
 }
 
 export async function logoutInspectorFromSupabase() {
-  if (supabaseReady && supabase) {
-    var response = await supabase.auth.signOut();
+  if (
+    supabaseReady &&
+    supabase
+  ) {
+    var response =
+      await supabase.auth.signOut();
 
     if (response.error) {
       throw response.error;
@@ -514,9 +807,10 @@ export async function updateInspectorProfile(
       "name"
     )
   ) {
-    allowed.name = String(
-      changes.name || ""
-    ).trim();
+    allowed.name =
+      String(
+        changes.name || ""
+      ).trim();
   }
 
   if (
@@ -525,9 +819,11 @@ export async function updateInspectorProfile(
       "department"
     )
   ) {
-    allowed.department = String(
-      changes.department || ""
-    ).trim();
+    allowed.department =
+      String(
+        changes.department ||
+          ""
+      ).trim();
   }
 
   if (
@@ -536,22 +832,33 @@ export async function updateInspectorProfile(
       "office"
     )
   ) {
-    allowed.office = String(
-      changes.office || ""
-    ).trim();
+    allowed.office =
+      String(
+        changes.office || ""
+      ).trim();
   }
 
-  if (!Object.keys(allowed).length) {
+  if (
+    !Object.keys(
+      allowed
+    ).length
+  ) {
     return;
   }
 
   allowed.updated_at =
     new Date().toISOString();
 
-  var response = await supabase
-    .from("inspectors")
-    .update(allowed)
-    .eq("user_id", uid);
+  var response =
+    await supabase
+      .from("inspectors")
+      .update(
+        allowed
+      )
+      .eq(
+        "user_id",
+        uid
+      );
 
   if (response.error) {
     throw response.error;
@@ -565,13 +872,18 @@ async function uploadPackageImage(
   item,
   previousPath
 ) {
-  if (!item || !item.file) {
+  if (
+    !item ||
+    !item.file
+  ) {
     return previousPath || "";
   }
 
-  var mimeType = String(
-    item.file.type || "image/jpeg"
-  ).toLowerCase();
+  var mimeType =
+    String(
+      item.file.type ||
+        "image/jpeg"
+    ).toLowerCase();
 
   var extension =
     mimeType === "image/png"
@@ -589,13 +901,24 @@ async function uploadPackageImage(
     "." +
     extension;
 
-  var response = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .upload(path, item.file, {
-      contentType: mimeType,
-      cacheControl: "3600",
-      upsert: true,
-    });
+  var response =
+    await supabase.storage
+      .from(
+        STORAGE_BUCKET
+      )
+      .upload(
+        path,
+        item.file,
+        {
+          contentType:
+            mimeType,
+
+          cacheControl:
+            "3600",
+
+          upsert: true,
+        }
+      );
 
   if (response.error) {
     throw response.error;
@@ -613,10 +936,13 @@ async function uploadEvidenceFiles(
 
   for (
     var index = 0;
-    index < (evidence || []).length;
+    index <
+    (evidence || [])
+      .length;
     index += 1
   ) {
-    var item = evidence[index];
+    var item =
+      evidence[index];
 
     if (!item) {
       continue;
@@ -624,35 +950,51 @@ async function uploadEvidenceFiles(
 
     if (!item.file) {
       result.push(
-        serializableRecord(item)
+        serializableRecord(
+          item
+        )
       );
 
       continue;
     }
 
-    var safeName = sanitizeFileName(
-      item.name || item.file.name
-    );
+    var safeName =
+      sanitizeFileName(
+        item.name ||
+          item.file.name
+      );
 
     var objectPath =
       uid +
       "/" +
       inspectionId +
       "/evidence/" +
-      sanitizeFileName(item.id) +
+      sanitizeFileName(
+        item.id
+      ) +
       "-" +
       safeName;
 
-    var response = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .upload(objectPath, item.file, {
-        contentType:
-          item.file.type ||
-          item.type ||
-          "application/octet-stream",
-        cacheControl: "3600",
-        upsert: true,
-      });
+    var response =
+      await supabase.storage
+        .from(
+          STORAGE_BUCKET
+        )
+        .upload(
+          objectPath,
+          item.file,
+          {
+            contentType:
+              item.file.type ||
+              item.type ||
+              "application/octet-stream",
+
+            cacheControl:
+              "3600",
+
+            upsert: true,
+          }
+        );
 
     if (response.error) {
       throw response.error;
@@ -660,21 +1002,27 @@ async function uploadEvidenceFiles(
 
     result.push({
       id: item.id,
+
       name:
         item.name ||
         item.file.name,
+
       size:
         item.size ||
         item.file.size ||
         0,
+
       type:
         item.type ||
         item.file.type ||
         "",
+
       addedAt:
         item.addedAt ||
         Date.now(),
-      storagePath: objectPath,
+
+      storagePath:
+        objectPath,
     });
   }
 
@@ -690,22 +1038,34 @@ export async function saveCloudInspection(
   requireSupabase();
 
   var inspectionId =
-    String(record.id);
+    String(
+      record.id
+    );
 
   var previousResponse =
     await supabase
-      .from("inspections")
-      .select("record")
-      .eq("id", inspectionId)
+      .from(
+        "inspections"
+      )
+      .select(
+        "record"
+      )
+      .eq(
+        "id",
+        inspectionId
+      )
       .maybeSingle();
 
-  if (previousResponse.error) {
+  if (
+    previousResponse.error
+  ) {
     throw previousResponse.error;
   }
 
   var previousRecord =
     previousResponse.data
-      ? previousResponse.data.record
+      ? previousResponse
+          .data.record
       : null;
 
   var previousStorage =
@@ -713,17 +1073,20 @@ export async function saveCloudInspection(
       previousRecord
     );
 
-  var panelKeys = Array.from(
-    new Set(
-      Object.keys(
-        packageImages || {}
-      ).concat(
+  var panelKeys =
+    Array.from(
+      new Set(
         Object.keys(
-          previousStorage.package || {}
+          packageImages ||
+            {}
+        ).concat(
+          Object.keys(
+            previousStorage.package ||
+              {}
+          )
         )
       )
-    )
-  );
+    );
 
   var panelUploads =
     await Promise.all(
@@ -734,7 +1097,9 @@ export async function saveCloudInspection(
             inspectionId,
             side,
             packageImages &&
-              packageImages[side],
+              packageImages[
+                side
+              ],
             previousStorage.package &&
               previousStorage.package[
                 side
@@ -747,10 +1112,21 @@ export async function saveCloudInspection(
   var packagePaths = {};
 
   panelKeys.forEach(
-    function (side, index) {
-      if (panelUploads[index]) {
-        packagePaths[side] =
-          panelUploads[index];
+    function (
+      side,
+      index
+    ) {
+      if (
+        panelUploads[
+          index
+        ]
+      ) {
+        packagePaths[
+          side
+        ] =
+          panelUploads[
+            index
+          ];
       }
     }
   );
@@ -774,7 +1150,8 @@ export async function saveCloudInspection(
             record.ownerId ||
             "",
 
-          imagePreview: "",
+          imagePreview:
+            "",
 
           packageImages:
             Object.keys(
@@ -784,8 +1161,9 @@ export async function saveCloudInspection(
                 result,
                 key
               ) {
-                result[key] =
-                  "";
+                result[
+                  key
+                ] = "";
 
                 return result;
               },
@@ -794,7 +1172,9 @@ export async function saveCloudInspection(
 
           evidence:
             uploadedEvidence.map(
-              function (item) {
+              function (
+                item
+              ) {
                 var copy =
                   Object.assign(
                     {},
@@ -826,7 +1206,9 @@ export async function saveCloudInspection(
 
   var saveResponse =
     await supabase
-      .from("inspections")
+      .from(
+        "inspections"
+      )
       .upsert(
         {
           id:
@@ -851,15 +1233,18 @@ export async function saveCloudInspection(
             stableRecord,
 
           updated_at:
-            new Date()
-              .toISOString(),
+            new Date().toISOString(),
         },
+
         {
-          onConflict: "id",
+          onConflict:
+            "id",
         }
       );
 
-  if (saveResponse.error) {
+  if (
+    saveResponse.error
+  ) {
     throw saveResponse.error;
   }
 
@@ -881,13 +1266,21 @@ export async function saveCloudInspection(
       }
     );
 
-  if (orphanedPaths.length) {
+  if (
+    orphanedPaths.length
+  ) {
     var cleanupResponse =
       await supabase.storage
-        .from(STORAGE_BUCKET)
-        .remove(orphanedPaths);
+        .from(
+          STORAGE_BUCKET
+        )
+        .remove(
+          orphanedPaths
+        );
 
-    if (cleanupResponse.error) {
+    if (
+      cleanupResponse.error
+    ) {
       console.warn(
         "MetroCheck Supabase storage cleanup skipped:",
         cleanupResponse.error
@@ -913,21 +1306,25 @@ export async function loadCloudHistory(
 ) {
   requireSupabase();
 
-  var response = await supabase
-    .from("inspections")
-    .select(
-      "id, record, timestamp"
-    )
-    .eq(
-      "owner_uid",
-      uid
-    )
-    .order(
-      "timestamp",
-      {
-        ascending: false,
-      }
-    );
+  var response =
+    await supabase
+      .from(
+        "inspections"
+      )
+      .select(
+        "id, record, timestamp"
+      )
+      .eq(
+        "owner_uid",
+        uid
+      )
+      .order(
+        "timestamp",
+        {
+          ascending:
+            false,
+        }
+      );
 
   if (response.error) {
     throw response.error;
@@ -938,14 +1335,16 @@ export async function loadCloudHistory(
 
   var paths = [];
 
-  rows.forEach(function (row) {
-    paths =
-      paths.concat(
-        collectStoragePaths(
-          row.record
-        )
-      );
-  });
+  rows.forEach(
+    function (row) {
+      paths =
+        paths.concat(
+          collectStoragePaths(
+            row.record
+          )
+        );
+    }
+  );
 
   var signedUrlMap =
     await createSignedUrlMap(
@@ -962,6 +1361,7 @@ export async function loadCloudHistory(
             id: row.id,
           }
         ),
+
         signedUrlMap
       );
     }
@@ -994,14 +1394,17 @@ export async function loadSupervisorHistory(
 
   var response =
     await supabase
-      .from("inspections")
+      .from(
+        "inspections"
+      )
       .select(
         "id, record, timestamp"
       )
       .order(
         "timestamp",
         {
-          ascending: false,
+          ascending:
+            false,
         }
       );
 
@@ -1015,7 +1418,8 @@ export async function loadSupervisorHistory(
   /*
    * Supervisor overview is metadata-first.
    * Private package/evidence files remain
-   * owner-scoped under Storage RLS.
+   * owner-scoped under the existing Storage
+   * RLS policy.
    */
   var emptySignedUrlMap =
     new Map();
@@ -1030,6 +1434,7 @@ export async function loadSupervisorHistory(
             id: row.id,
           }
         ),
+
         emptySignedUrlMap
       );
     }
@@ -1044,8 +1449,12 @@ export async function deleteCloudInspection(
 
   var lookupResponse =
     await supabase
-      .from("inspections")
-      .select("record")
+      .from(
+        "inspections"
+      )
+      .select(
+        "record"
+      )
       .eq(
         "id",
         String(
@@ -1058,26 +1467,35 @@ export async function deleteCloudInspection(
       )
       .maybeSingle();
 
-  if (lookupResponse.error) {
+  if (
+    lookupResponse.error
+  ) {
     throw lookupResponse.error;
   }
 
   var storagePaths =
     collectStoragePaths(
       lookupResponse.data
-        ? lookupResponse.data.record
+        ? lookupResponse.data
+            .record
         : null
     );
 
-  if (storagePaths.length) {
+  if (
+    storagePaths.length
+  ) {
     var storageResponse =
       await supabase.storage
-        .from(STORAGE_BUCKET)
+        .from(
+          STORAGE_BUCKET
+        )
         .remove(
           storagePaths
         );
 
-    if (storageResponse.error) {
+    if (
+      storageResponse.error
+    ) {
       console.warn(
         "MetroCheck Supabase storage cleanup skipped:",
         storageResponse.error
@@ -1087,7 +1505,9 @@ export async function deleteCloudInspection(
 
   var deleteResponse =
     await supabase
-      .from("inspections")
+      .from(
+        "inspections"
+      )
       .delete()
       .eq(
         "id",
@@ -1100,7 +1520,9 @@ export async function deleteCloudInspection(
         uid
       );
 
-  if (deleteResponse.error) {
+  if (
+    deleteResponse.error
+  ) {
     throw deleteResponse.error;
   }
 }
@@ -1110,15 +1532,18 @@ export async function clearCloudHistory(
 ) {
   requireSupabase();
 
-  var response = await supabase
-    .from("inspections")
-    .select(
-      "id, record"
-    )
-    .eq(
-      "owner_uid",
-      uid
-    );
+  var response =
+    await supabase
+      .from(
+        "inspections"
+      )
+      .select(
+        "id, record"
+      )
+      .eq(
+        "owner_uid",
+        uid
+      );
 
   if (response.error) {
     throw response.error;
@@ -1140,17 +1565,25 @@ export async function clearCloudHistory(
     }
   );
 
-  if (paths.length) {
+  if (
+    paths.length
+  ) {
     var storageResponse =
       await supabase.storage
-        .from(STORAGE_BUCKET)
+        .from(
+          STORAGE_BUCKET
+        )
         .remove(
           Array.from(
-            new Set(paths)
+            new Set(
+              paths
+            )
           )
         );
 
-    if (storageResponse.error) {
+    if (
+      storageResponse.error
+    ) {
       console.warn(
         "MetroCheck Supabase storage cleanup skipped:",
         storageResponse.error
@@ -1160,14 +1593,18 @@ export async function clearCloudHistory(
 
   var deleteResponse =
     await supabase
-      .from("inspections")
+      .from(
+        "inspections"
+      )
       .delete()
       .eq(
         "owner_uid",
         uid
       );
 
-  if (deleteResponse.error) {
+  if (
+    deleteResponse.error
+  ) {
     throw deleteResponse.error;
   }
 }
