@@ -1449,7 +1449,7 @@ async function prepareImageForOCR(source) {
 
     return blob || source;
   } catch (error) {
-    console.warn("MetroCheck OCR preprocessing skipped:", error);
+    console.warn("MetaInspect OCR preprocessing skipped:", error);
     return source;
   } finally {
     if (objectUrl) {
@@ -1700,7 +1700,7 @@ function App() {
             setAuthenticatedInspectorId("");
             setAuthInitializing(false);
             setToast(
-              "This Supabase account does not have a verified MetroCheck inspector profile."
+              "This Supabase account does not have a verified MetaInspect inspector profile."
             );
           }
           return;
@@ -1717,12 +1717,12 @@ function App() {
         setAuthenticatedInspectorId(profile.id);
         setAuthInitializing(false);
       } catch (error) {
-        console.error("MetroCheck Supabase session restore failed:", error);
+        console.error("MetaInspect Supabase session restore failed:", error);
         if (!cancelled) {
           setSupabaseUserUid("");
           setAuthenticatedInspectorId("");
           setAuthInitializing(false);
-          setToast("Could not restore the MetroCheck cloud session.");
+          setToast("Could not restore the MetaInspect cloud session.");
         }
       }
     });
@@ -1771,7 +1771,7 @@ function App() {
         );
       })
       .catch(function (error) {
-        console.error("MetroCheck cloud history load failed:", error);
+        console.error("MetaInspect cloud history load failed:", error);
         if (!cancelled) {
           setToast(role === "SUPERVISOR"
             ? "Could not load supervisor inspection view. Run the V2 Supabase role migration and try again."
@@ -2145,7 +2145,7 @@ function App() {
     try {
       previewUrl = URL.createObjectURL(file);
     } catch (error) {
-      console.error("MetroCheck image preview failed:", error);
+      console.error("MetaInspect image preview failed:", error);
       showToast(
         "This image could not be opened by the browser. Please try another photo."
       );
@@ -2318,7 +2318,7 @@ function App() {
           typeof File === "function"
             ? new File(
                 [blob],
-                "MetroCheck-" +
+                "MetaInspect-" +
                   captureSide +
                   "-Capture-" +
                   Date.now() +
@@ -2386,7 +2386,7 @@ function App() {
         );
       } catch (error) {
         console.error(
-          "MetroCheck camera capture failed:",
+          "MetaInspect camera capture failed:",
           error
         );
         showToast(
@@ -2432,7 +2432,7 @@ function App() {
       }
     } catch (error) {
       console.error(
-        "MetroCheck camera capture failed:",
+        "MetaInspect camera capture failed:",
         error
       );
       showToast(
@@ -2736,7 +2736,7 @@ function App() {
     if (supabaseReady && supabaseUserUid) {
       updateInspectorProfile(supabaseUserUid, { [key]: nextValue }).catch(
         function (error) {
-          console.error("MetroCheck profile update failed:", error);
+          console.error("MetaInspect profile update failed:", error);
           showToast("Profile change could not be synced to Supabase.");
         }
       );
@@ -2765,7 +2765,7 @@ function App() {
 
     if (!cleanId || !cleanEmail || !password) {
       showToast(
-        "Enter your approved MetroCheck Inspector ID, registered email and a password to activate access."
+        "Enter your approved MetaInspect Inspector ID, registered email and a password to activate access."
       );
       return false;
     }
@@ -2777,7 +2777,7 @@ function App() {
 
     if (!registryRecord) {
       showToast(
-        "Inspector could not be verified against the MetroCheck prototype registry."
+        "Inspector could not be verified against the MetaInspect prototype registry."
       );
       return false;
     }
@@ -2808,7 +2808,7 @@ function App() {
         showToast("Inspector access activated successfully.");
         return true;
       } catch (error) {
-        console.error("MetroCheck Supabase registration failed:", error);
+        console.error("MetaInspect Supabase registration failed:", error);
         var errorText = String(
           error && error.message ? error.message : ""
         ).toLowerCase();
@@ -2818,7 +2818,7 @@ function App() {
           errorText.includes("exists")
             ? "This inspector access is already activated. Please sign in."
             : errorText.includes("inspector") || errorText.includes("registry")
-            ? "Activation denied: this Inspector ID and email are not approved in the MetroCheck registry."
+            ? "Activation denied: this Inspector ID and email are not approved in the MetaInspect registry."
             : "Could not activate the Supabase inspector account. Check your Supabase setup and try again.";
         showToast(registrationMessage);
         return false;
@@ -2865,7 +2865,7 @@ function App() {
     setSettingsOpen(false);
     resetInspection();
     showToast(
-      "Inspector verified. Welcome to MetroCheck."
+      "Inspector verified. Welcome to MetaInspect."
     );
 
     return true;
@@ -2917,7 +2917,7 @@ function App() {
         showToast("Welcome back, " + cloudAccount.name + ".");
         return true;
       } catch (error) {
-        console.error("MetroCheck Supabase login failed:", error);
+        console.error("MetaInspect Supabase login failed:", error);
         showToast(
           "Invalid Supabase account details or the inspector profile is not verified."
         );
@@ -2938,7 +2938,7 @@ function App() {
 
     if (!account) {
       showToast(
-        "Invalid MetroCheck account details. Please verify your email and password."
+        "Invalid MetaInspect account details. Please verify your email and password."
       );
       return false;
     }
@@ -2960,7 +2960,7 @@ function App() {
       try {
         await logoutInspectorFromSupabase();
       } catch (error) {
-        console.error("MetroCheck Supabase logout failed:", error);
+        console.error("MetaInspect Supabase logout failed:", error);
       }
     }
 
@@ -2970,7 +2970,7 @@ function App() {
     setHistory([]);
     setSettingsOpen(false);
     setPage("dashboard");
-    showToast("Signed out of MetroCheck.");
+    showToast("Signed out of MetaInspect.");
   }
 
   function handleEvidence(files) {
@@ -3168,7 +3168,7 @@ function App() {
         navigate("history");
         return;
       } catch (error) {
-        console.error("MetroCheck cloud inspection save failed:", error);
+        console.error("MetaInspect cloud inspection save failed:", error);
         showToast(
           "Inspection could not be saved to Supabase. Check your connection and Supabase rules."
         );
@@ -3329,7 +3329,7 @@ function App() {
         });
         showToast("Inspection removed from Supabase.");
       } catch (error) {
-        console.error("MetroCheck cloud delete failed:", error);
+        console.error("MetaInspect cloud delete failed:", error);
         showToast("Inspection could not be deleted from Supabase.");
       }
       return;
@@ -3375,7 +3375,7 @@ function App() {
         setHistory([]);
         showToast("Your Supabase inspection history was cleared.");
       } catch (error) {
-        console.error("MetroCheck cloud history clear failed:", error);
+        console.error("MetaInspect cloud history clear failed:", error);
         showToast("Inspection history could not be cleared from Supabase.");
       }
       return;
@@ -3453,7 +3453,7 @@ function App() {
     );
 
     doc.text(
-      "METROCHECK",
+      "METAINSPECT",
       margin,
       y
     );
@@ -3890,7 +3890,7 @@ function App() {
     );
 
     var footerText =
-      "MetroCheck is a prototype decision-support system. Automated screening assists inspection but does not replace inspector verification. Final enforcement decisions require applicable Legal Metrology rules, commodity-specific requirements, tolerances and competent authority verification.";
+      "MetaInspect is a prototype decision-support system. Automated screening assists inspection but does not replace inspector verification. Final enforcement decisions require applicable Legal Metrology rules, commodity-specific requirements, tolerances and competent authority verification.";
 
     var footerLines =
       doc.splitTextToSize(
@@ -3906,7 +3906,7 @@ function App() {
 
     doc.save(
       inspectionId +
-        "-MetroCheck-Report.pdf"
+        "-MetaInspect-Report.pdf"
     );
 
     showToast(
@@ -3920,7 +3920,7 @@ function App() {
     }
 
     var rows = [
-      ["MetroCheck Editable Compliance Report", ""],
+      ["MetaInspect Editable Compliance Report", ""],
       ["Inspection ID", inspectionId],
       ["Inspection Source", inspectionSource === "ECOMMERCE" ? "E-commerce Listing" : "Physical Package"],
       ["Date", formatDate(new Date(inspectionTimestamp || Date.now()))],
@@ -3964,7 +3964,7 @@ function App() {
     var url = URL.createObjectURL(blob);
     var link = document.createElement("a");
     link.href = url;
-    link.download = inspectionId + "-MetroCheck-Editable.csv";
+    link.download = inspectionId + "-MetaInspect-Editable.csv";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -3997,7 +3997,7 @@ function App() {
           fontWeight: 700,
         }}
       >
-        Restoring secure MetroCheck session…
+        Restoring secure MetaInspect session…
       </div>
     );
   }
@@ -4027,7 +4027,37 @@ function App() {
       <style>{`
         .mc-mobile-nav { display: none; }
 
-        /* MetroCheck visual polish — presentation only, no workflow changes */
+        /* MetaInspect wordmark: visually separate Meta + Inspect without wrapping. */
+        .mi-wordmark {
+          display: inline-flex !important;
+          align-items: baseline;
+          flex-wrap: nowrap !important;
+          white-space: nowrap !important;
+          gap: 0 !important;
+        }
+        .mi-wordmark > span {
+          display: inline !important;
+          margin: 0 !important;
+          white-space: nowrap !important;
+          font-size: inherit !important;
+          line-height: inherit !important;
+          letter-spacing: inherit !important;
+          font-family: inherit !important;
+        }
+
+        .sidebar .brand-name.mi-wordmark {
+          font-size: 17px !important;
+          line-height: 1 !important;
+          letter-spacing: 0.015em !important;
+        }
+        .sidebar .brand-subtitle {
+          margin-top: 5px !important;
+          font-size: 7px !important;
+          line-height: 1.3 !important;
+          letter-spacing: 0.065em !important;
+        }
+
+        /* MetaInspect visual polish — presentation only, no workflow changes */
         .app-shell {
           background:
             radial-gradient(circle at 80% -10%, rgba(37,99,235,0.10), transparent 32%),
@@ -4270,16 +4300,20 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <span>MC</span>
+            <span>MI</span>
           </div>
 
           <div>
-            <div className="brand-name">
-              METROCHECK
+            <div
+              className="brand-name mi-wordmark"
+              aria-label="MetaInspect"
+              style={{ display: "inline-flex", flexDirection: "row", alignItems: "baseline", flexWrap: "nowrap", whiteSpace: "nowrap", gap: 0 }}
+            >
+              <span style={{ display: "inline-block", fontWeight: 900 }}>Meta</span><span style={{ display: "inline-block", fontWeight: 700, color: "#4c92ff" }}>Inspect</span>
             </div>
 
             <div className="brand-subtitle">
-              LEGAL METROLOGY AI
+              AI-POWERED LEGAL METROLOGY COMPLIANCE & INSPECTION PLATFORM
             </div>
           </div>
         </div>
@@ -4372,7 +4406,7 @@ function App() {
           >
             <Icon name="info" />
             <span>
-              About MetroCheck
+              About MetaInspect
             </span>
           </button>
         </div>
@@ -4447,7 +4481,7 @@ function App() {
           <div className="topbar-left">
             <div className="breadcrumb">
               <span>
-                MetroCheck
+                MetaInspect
               </span>
 
               <span className="breadcrumb-separator">
@@ -4479,7 +4513,7 @@ function App() {
               type="button"
               className="icon-button"
               title="Settings"
-              aria-label="Open MetroCheck settings"
+              aria-label="Open MetaInspect settings"
               onClick={function () {
                 openSettings("settings");
               }}
@@ -4727,7 +4761,7 @@ function App() {
         )}
       </main>
 
-      <nav className="mc-mobile-nav" aria-label="MetroCheck mobile navigation">
+      <nav className="mc-mobile-nav" aria-label="MetaInspect mobile navigation">
         {[
           ["dashboard", "grid", "Home"],
           ["scanner", "scan", "Inspect"],
@@ -4908,11 +4942,11 @@ function DashboardPage(props) {
             />
 
             <strong>
-              METRO
+              META
             </strong>
 
             <span>
-              CHECK
+              INSPECT
             </span>
           </div>
 
@@ -5194,7 +5228,7 @@ function DashboardPage(props) {
               </span>
 
               <h3>
-                How MetroCheck works
+                How MetaInspect works
               </h3>
             </div>
           </div>
@@ -5726,7 +5760,7 @@ function ScannerPage(props) {
                 Multi-panel package coverage
               </strong>
               <div style={{ marginTop: "3px" }}>
-                Capture the Front / Principal Panel first, then add Back, Left, Right, Top, Bottom or an additional label/sticker when applicable. MetroCheck keeps each declaration tied to the panel where OCR detected it.
+                Capture the Front / Principal Panel first, then add Back, Left, Right, Top, Bottom or an additional label/sticker when applicable. MetaInspect keeps each declaration tied to the panel where OCR detected it.
               </div>
             </div>
 
@@ -5954,7 +5988,7 @@ function ScannerPage(props) {
                 <Icon name="info" size={18} />
                 <span>
                   <strong>Font-size result is a screening aid.</strong><br />
-                  Pixel height depends on camera distance and image resolution. MetroCheck flags small/unclear text for review; statutory physical type-height compliance still requires calibrated measurement or inspector verification.
+                  Pixel height depends on camera distance and image resolution. MetaInspect flags small/unclear text for review; statutory physical type-height compliance still requires calibrated measurement or inspector verification.
                 </span>
               </div>
             </div>
@@ -6853,7 +6887,7 @@ function CameraModal(props) {
           track.stop();
         });
       } catch (error) {
-        console.warn("MetroCheck camera cleanup warning:", error);
+        console.warn("MetaInspect camera cleanup warning:", error);
       }
 
       streamRef.current = null;
@@ -6960,7 +6994,7 @@ function CameraModal(props) {
         finishWithFallback(
           window.isSecureContext
             ? "Live camera is not supported by this browser. Use the camera button below."
-            : "Live browser camera requires HTTPS or localhost. Use the device camera button below, or open MetroCheck through HTTPS/localhost."
+            : "Live browser camera requires HTTPS or localhost. Use the device camera button below, or open MetaInspect through HTTPS/localhost."
         );
         return;
       }
@@ -6979,7 +7013,7 @@ function CameraModal(props) {
           });
         } catch (preferredError) {
           console.warn(
-            "MetroCheck preferred camera constraints failed; retrying default camera:",
+            "MetaInspect preferred camera constraints failed; retrying default camera:",
             preferredError
           );
 
@@ -7024,11 +7058,11 @@ function CameraModal(props) {
                * on that promise; metadata/canplay can still make the stream
                * usable and waitForVideo has its own timeout.
                */
-              console.warn("MetroCheck camera play warning:", playError);
+              console.warn("MetaInspect camera play warning:", playError);
             });
           }
         } catch (playError) {
-          console.warn("MetroCheck camera play warning:", playError);
+          console.warn("MetaInspect camera play warning:", playError);
         }
 
         await waitForVideo(video);
@@ -7040,7 +7074,7 @@ function CameraModal(props) {
         setCameraStatus("ready");
         setCameraMessage("");
       } catch (error) {
-        console.error("MetroCheck live camera failed:", error);
+        console.error("MetaInspect live camera failed:", error);
 
         var errorName = error && error.name ? String(error.name) : "";
         var message =
@@ -7078,7 +7112,7 @@ function CameraModal(props) {
 
   function createCapturedFile(blob) {
     var fileName =
-      "MetroCheck-" +
+      "MetaInspect-" +
       selectedSide +
       "-Capture-" +
       Date.now() +
@@ -7186,7 +7220,7 @@ function CameraModal(props) {
         props.onCaptureFile(file, selectedSide);
       }
     } catch (error) {
-      console.error("MetroCheck photo capture failed:", error);
+      console.error("MetaInspect photo capture failed:", error);
       setCameraMessage(
         "The photo could not be captured. Try the device camera button below."
       );
@@ -8033,7 +8067,7 @@ function AboutPage() {
     <div className="page">
       <PageTitle
         eyebrow="SYSTEM"
-        title="About MetroCheck"
+        title="About MetaInspect"
         text="A decision-support prototype for packaged commodity inspection under Legal Metrology requirements."
       />
 
@@ -8047,8 +8081,12 @@ function AboutPage() {
         </div>
 
         <div>
-          <span className="eyebrow">
-            METROCHECK
+          <span
+            className="eyebrow mi-wordmark"
+            aria-label="MetaInspect"
+            style={{ display: "inline-flex", flexDirection: "row", alignItems: "baseline", flexWrap: "nowrap", whiteSpace: "nowrap", gap: 0 }}
+          >
+            <span style={{ display: "inline-block", fontWeight: 900 }}>Meta</span><span style={{ display: "inline-block", fontWeight: 800, color: "#4c92ff" }}>Inspect</span>
           </span>
 
           <h2>
@@ -8058,7 +8096,7 @@ function AboutPage() {
           </h2>
 
           <p>
-            MetroCheck combines
+            MetaInspect combines
             camera capture,
             image-based text
             extraction, structured
@@ -8130,7 +8168,7 @@ function AboutPage() {
         </div>
 
         <p>
-          MetroCheck is a
+          MetaInspect is a
           demonstration
           decision-support system.
           Automated screening
@@ -8164,7 +8202,7 @@ function AboutPage() {
         <p>
           This prototype was developed in response to Smart India Hackathon
           2026 Problem Statement SIH26034 from the Ministry of Consumer
-          Affairs, Food &amp; Public Distribution. MetroCheck is an independent
+          Affairs, Food &amp; Public Distribution. MetaInspect is an independent
           student prototype and does not represent an official government
           service.
         </p>
@@ -8446,7 +8484,7 @@ function ConsumerQuickCheck(props) {
       );
       setProgress(100);
     } catch (consumerError) {
-      console.error("MetroCheck consumer OCR failed:", consumerError);
+      console.error("MetaInspect consumer OCR failed:", consumerError);
       setError(
         "We could not read this clearly. Try a brighter, straight-on photo with the label filling most of the frame."
       );
@@ -8486,7 +8524,7 @@ function ConsumerQuickCheck(props) {
 
   var resultText =
     score >= 90 && needsAttention.length <= 1
-      ? "MetroCheck found most of the important declarations consumers normally look for."
+      ? "MetaInspect found most of the important declarations consumers normally look for."
       : "This does not automatically mean the product is illegal. Check the package manually or ask an inspector if something important is missing.";
 
   var consumerBg = props.darkMode ? "#07111f" : "#f4f7fb";
@@ -8516,8 +8554,8 @@ function ConsumerQuickCheck(props) {
         .mc-consumer-topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
         .mc-consumer-brand { display:flex; align-items:center; gap:10px; min-width:0; }
         .mc-consumer-logo { width:42px; height:42px; border-radius:13px; display:grid; place-items:center; color:white; font-weight:900; background:linear-gradient(145deg,#2563eb,#0f56d9); box-shadow:0 10px 26px rgba(37,99,235,.24); }
-        .mc-consumer-brand strong { display:block; font-size:15px; letter-spacing:.08em; }
-        .mc-consumer-brand span { display:block; margin-top:2px; font-size:11px; opacity:.68; }
+        .mc-consumer-brand strong { display:inline-flex; font-size:24px; line-height:1; letter-spacing:.015em; }
+        .mc-consumer-brand > div > span { display:block; margin-top:5px; font-size:9px; line-height:1.25; font-weight:700; opacity:.62; }
         .mc-consumer-top-actions { display:flex; gap:8px; }
         .mc-consumer-icon-button { min-height:40px; border-radius:12px; border:1px solid ${consumerBorder}; background:${consumerSurface}; color:${consumerText}; padding:9px 12px; font-weight:800; cursor:pointer; }
         .mc-consumer-hero { position:relative; overflow:hidden; padding:28px 30px; border:1px solid ${consumerBorder}; border-radius:26px; background:radial-gradient(circle at 88% 20%,rgba(37,99,235,.16),transparent 24%),linear-gradient(135deg,${consumerSurface} 0%,${consumerSoft} 100%); box-shadow:0 24px 70px rgba(15,23,42,.08); }
@@ -8595,7 +8633,7 @@ function ConsumerQuickCheck(props) {
         @media (max-width:760px) {
           .mc-consumer-shell { padding:10px; }
           .mc-consumer-topbar { margin-bottom:10px; position:sticky; top:0; z-index:20; padding:5px 0; background:${consumerBg}; }
-          .mc-consumer-brand span { display:none; }
+          .mc-consumer-brand > div > span { display:none; }
           .mc-consumer-icon-button { font-size:0; width:40px; padding:0; }
           .mc-consumer-icon-button::first-letter { font-size:15px; }
           .mc-consumer-hero { padding:17px 15px; border-radius:18px; }
@@ -8629,10 +8667,14 @@ function ConsumerQuickCheck(props) {
       <div className="mc-consumer-shell">
         <header className="mc-consumer-topbar">
           <div className="mc-consumer-brand">
-            <div className="mc-consumer-logo">MC</div>
+            <div className="mc-consumer-logo">MI</div>
             <div>
-              <strong>METROCHECK</strong>
-              <span>Consumer package check</span>
+              <strong
+                className="mi-wordmark"
+                aria-label="MetaInspect"
+                style={{ display: "inline-flex", flexDirection: "row", alignItems: "baseline", flexWrap: "nowrap", whiteSpace: "nowrap", gap: 0 }}
+              ><span style={{ display: "inline-block", fontWeight: 900 }}>Meta</span><span style={{ display: "inline-block", fontWeight: 700, color: "#4c92ff" }}>Inspect</span></strong>
+              <span>AI-Powered Legal Metrology Compliance & Inspection Platform</span>
             </div>
           </div>
 
@@ -8663,7 +8705,7 @@ function ConsumerQuickCheck(props) {
           <h1>One package. Every visible declaration. One clear check.</h1>
           <p>
             Capture or upload the front, back, left, right, top and bottom panels
-            as needed. MetroCheck combines visible declarations across the pack and
+            as needed. MetaInspect combines visible declarations across the pack and
             turns them into a simple, easy-to-understand consumer screening result.
           </p>
 
@@ -8918,7 +8960,7 @@ function ConsumerQuickCheck(props) {
               </div>
               <div className="mc-consumer-tip">
                 <strong>No quantity guessing</strong>
-                <span>MetroCheck reads the declared quantity; a photo cannot measure the actual contents.</span>
+                <span>MetaInspect reads the declared quantity; a photo cannot measure the actual contents.</span>
               </div>
             </div>
           </aside>
@@ -9190,18 +9232,20 @@ function InspectorAuthPage(props) {
         }
 
         .mc-auth-brand-copy strong {
-          display: block;
+          display: inline-flex;
           font-family: Manrope, sans-serif;
-          font-size: 15px;
+          font-size: 26px;
+          line-height: 1;
           font-weight: 900;
-          letter-spacing: 0.095em;
+          letter-spacing: 0.015em;
         }
 
-        .mc-auth-brand-copy span {
+        .mc-auth-brand-copy > span {
           display: block;
-          margin-top: 3px;
+          margin-top: 6px;
           color: var(--mc-auth-muted);
-          font-size: 10.5px;
+          font-size: 9px;
+          line-height: 1.25;
           font-weight: 700;
         }
 
@@ -9826,7 +9870,7 @@ function InspectorAuthPage(props) {
             display: none;
           }
 
-          .mc-auth-brand-copy span {
+          .mc-auth-brand-copy > span {
             display: none;
           }
 
@@ -9947,10 +9991,14 @@ function InspectorAuthPage(props) {
       <div className="mc-auth-shell">
         <header className="mc-auth-topbar">
           <div className="mc-auth-brand">
-            <div className="mc-auth-brand-mark">MC</div>
+            <div className="mc-auth-brand-mark">MI</div>
             <div className="mc-auth-brand-copy">
-              <strong>METROCHECK</strong>
-              <span>Legal Metrology Digital Inspection Platform</span>
+              <strong
+                className="mi-wordmark"
+                aria-label="MetaInspect"
+                style={{ display: "inline-flex", flexDirection: "row", alignItems: "baseline", flexWrap: "nowrap", whiteSpace: "nowrap", gap: 0 }}
+              ><span style={{ display: "inline-block", fontWeight: 900 }}>Meta</span><span style={{ display: "inline-block", fontWeight: 700, color: "#4c92ff" }}>Inspect</span></strong>
+              <span>AI-Powered Legal Metrology Compliance & Inspection Platform</span>
             </div>
           </div>
 
@@ -9965,7 +10013,7 @@ function InspectorAuthPage(props) {
               className="mc-auth-theme-button"
               onClick={props.onToggleDarkMode}
               title="Toggle theme"
-              aria-label="Toggle MetroCheck theme"
+              aria-label="Toggle MetaInspect theme"
             >
               {darkMode ? "☀" : "☾"}
             </button>
@@ -9987,7 +10035,7 @@ function InspectorAuthPage(props) {
             </h1>
 
             <p className="mc-auth-lead">
-              MetroCheck turns packaged-commodity inspection into one connected
+              MetaInspect turns packaged-commodity inspection into one connected
               workflow — capture the label, extract declarations with OCR,
               screen compliance rules, preserve evidence and generate an
               inspector-ready report.
@@ -10052,7 +10100,7 @@ function InspectorAuthPage(props) {
           <div className="mc-auth-access-wrap">
             <section
               className="mc-auth-card"
-              aria-label="MetroCheck inspector access"
+              aria-label="MetaInspect inspector access"
             >
               <div className="mc-auth-card-top">
                 <div>
@@ -10073,7 +10121,7 @@ function InspectorAuthPage(props) {
 
               <p className="mc-auth-card-description">
                 {mode === "login"
-                  ? "Sign in with the official email linked to your MetroCheck inspector account."
+                  ? "Sign in with the official email linked to your MetaInspect inspector account."
                   : "First-time activation verifies the Inspector ID and email already approved for you before access is enabled."}
               </p>
 
@@ -10155,7 +10203,7 @@ function InspectorAuthPage(props) {
                       onChange={function (event) {
                         setPassword(event.target.value);
                       }}
-                      placeholder="Enter your MetroCheck password"
+                      placeholder="Enter your MetaInspect password"
                       autoComplete="current-password"
                       required
                     />
@@ -10194,12 +10242,12 @@ function InspectorAuthPage(props) {
                   >
                     <strong>Already approved by your department?</strong>
                     <div style={{ marginTop: "4px" }}>
-                      Use this once to verify your Inspector ID and registered email, then create your MetroCheck password. This does not create a new inspector identity.
+                      Use this once to verify your Inspector ID and registered email, then create your MetaInspect password. This does not create a new inspector identity.
                     </div>
                   </div>
 
                   <label className="mc-auth-field">
-                    MetroCheck Inspector ID
+                    MetaInspect Inspector ID
                     <input
                       type="text"
                       value={inspectorId}
@@ -10312,7 +10360,7 @@ function InspectorAuthPage(props) {
 
         <footer className="mc-auth-footer">
           <span>
-            <strong>MetroCheck</strong> · Digital decision support for packaged commodity inspection.
+            <strong>MetaInspect</strong> · Digital decision support for packaged commodity inspection.
           </span>
           <span>
             OCR-assisted screening · Inspector-verified enforcement decisions
@@ -10391,7 +10439,7 @@ function SettingsModal(props) {
         >
           <div>
             <div style={{ fontSize: "11px", fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: muted, marginBottom: "6px" }}>
-              MetroCheck
+              MetaInspect
             </div>
             <h2 id="metrocheck-settings-title" style={{ margin: 0, fontSize: "22px", lineHeight: 1.2 }}>
               {props.view === "profile" ? "Inspector Profile" : "Settings"}
@@ -10455,7 +10503,7 @@ function SettingsModal(props) {
                       {inspector.name || "Inspector"}
                     </strong>
                     <span style={{ display: "block", marginTop: "3px", color: muted, fontSize: "12px" }}>
-                      {normalizeRole(inspector.role) === "SUPERVISOR" ? "Verified MetroCheck supervisor" : "Verified MetroCheck inspector"}
+                      {normalizeRole(inspector.role) === "SUPERVISOR" ? "Verified MetaInspect supervisor" : "Verified MetaInspect inspector"}
                     </span>
                   </div>
                 </div>
@@ -10470,7 +10518,7 @@ function SettingsModal(props) {
               </div>
 
               <p style={{ margin: "12px 0 0", color: muted, fontSize: "12px", lineHeight: 1.55 }}>
-                These prototype identity details come from the MetroCheck access registry. Production deployment should integrate with the authorized department identity source.
+                These prototype identity details come from the MetaInspect access registry. Production deployment should integrate with the authorized department identity source.
               </p>
 
               <button
@@ -10506,7 +10554,7 @@ function SettingsModal(props) {
                   <div>
                     <div style={{ fontSize: "15px", fontWeight: 800 }}>Appearance</div>
                     <div style={{ marginTop: "4px", color: muted, fontSize: "12px" }}>
-                      Switch the MetroCheck workspace theme.
+                      Switch the MetaInspect workspace theme.
                     </div>
                   </div>
                   <button
@@ -10599,12 +10647,12 @@ class MetroCheckErrorBoundary extends Component {
 
   static getDerivedStateFromError(error) {
     return {
-      error: error || new Error("Unknown MetroCheck rendering error"),
+      error: error || new Error("Unknown MetaInspect rendering error"),
     };
   }
 
   componentDidCatch(error, info) {
-    console.error("MetroCheck render failure:", error, info);
+    console.error("MetaInspect render failure:", error, info);
   }
 
   render() {
@@ -10615,7 +10663,7 @@ class MetroCheckErrorBoundary extends Component {
     var message =
       this.state.error && this.state.error.message
         ? String(this.state.error.message)
-        : "MetroCheck encountered an unexpected rendering error.";
+        : "MetaInspect encountered an unexpected rendering error.";
 
     return (
       <div
@@ -10642,7 +10690,7 @@ class MetroCheckErrorBoundary extends Component {
           }}
         >
           <div style={{ fontSize: "12px", fontWeight: 900, color: "#1769ff" }}>
-            METROCHECK RECOVERY SCREEN
+            METAINSPECT RECOVERY SCREEN
           </div>
           <h1 style={{ margin: "8px 0 10px", fontSize: "24px" }}>
             The app hit a rendering error
@@ -10680,7 +10728,7 @@ class MetroCheckErrorBoundary extends Component {
               fontWeight: 800,
             }}
           >
-            Reload MetroCheck
+            Reload MetaInspect
           </button>
         </div>
       </div>
