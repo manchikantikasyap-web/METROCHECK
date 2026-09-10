@@ -4039,6 +4039,57 @@ function App() {
           box-shadow: 10px 0 38px rgba(15,23,42,0.04);
           backdrop-filter: blur(18px);
         }
+
+        /* Dark-mode repair only: keep the full workspace shell + left sidebar dark. */
+        body.dark-mode {
+          --background: #091321;
+          --sidebar: #071426;
+        }
+        body.dark-mode .app-shell {
+          background:
+            radial-gradient(circle at 80% -10%, rgba(59,130,246,0.10), transparent 32%),
+            radial-gradient(circle at 15% 110%, rgba(14,165,233,0.06), transparent 28%),
+            #091321 !important;
+        }
+        body.dark-mode .sidebar {
+          background: linear-gradient(180deg, #081626 0%, #071426 55%, #050f1d 100%) !important;
+          color: #f8fafc !important;
+          border-right: 1px solid rgba(100,116,139,0.22) !important;
+          box-shadow: 12px 0 38px rgba(0,0,0,0.24);
+        }
+        body.dark-mode .sidebar .brand-name {
+          color: #f8fafc;
+        }
+        body.dark-mode .sidebar .brand-subtitle,
+        body.dark-mode .sidebar .sidebar-label {
+          color: #71839b;
+        }
+        body.dark-mode .sidebar .nav-item {
+          color: #9eabc0;
+        }
+        body.dark-mode .sidebar .nav-item:hover {
+          color: #ffffff;
+          background: rgba(255,255,255,0.06);
+        }
+        body.dark-mode .sidebar .nav-item.active {
+          color: #ffffff;
+          background: rgba(37,99,235,0.20);
+          box-shadow: inset 3px 0 0 #3b82f6, 0 8px 22px rgba(0,0,0,0.12);
+        }
+        body.dark-mode .sidebar .system-card {
+          background: rgba(255,255,255,0.04);
+          border-color: rgba(148,163,184,0.12);
+        }
+        body.dark-mode .sidebar .theme-button {
+          color: #9eabc0;
+        }
+        body.dark-mode .sidebar .theme-button:hover {
+          color: #ffffff;
+          background: rgba(255,255,255,0.06);
+        }
+        body.dark-mode .sidebar .profile-mini {
+          border-top-color: rgba(148,163,184,0.12);
+        }
         .brand-mark {
           box-shadow: 0 12px 28px rgba(37,99,235,0.25) !important;
           transform: translateZ(0);
