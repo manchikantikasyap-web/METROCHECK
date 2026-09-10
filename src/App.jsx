@@ -93,7 +93,7 @@ const FIELD_CONFIG = [
 
 const PACKAGE_PANELS = [
   { key: "front", label: "Front / Principal Panel", required: true },
-  { key: "back", label: "Back Panel", required: false },
+  { key: "back", label: "Back Panel", required: true },
   { key: "left", label: "Left Panel", required: false },
   { key: "right", label: "Right Panel", required: false },
   { key: "top", label: "Top Panel", required: false },
