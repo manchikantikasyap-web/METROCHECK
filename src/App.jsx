@@ -778,6 +778,104 @@ function cleanExtractedValue(value) {
     .trim();
 }
 
+/*
+ * MRP OCR recovery
+ * Tesseract may read "MRP ₹ 20.00" as variants such as:
+ * "MRP 20.00", "M.R.P. Rs 20.00", "MRP ? 20.00", or "MRP 2O.OO".
+ * Keep the recovery anchored to an MRP/retail-price label so dates,
+ * quantities and nutrition values are not mistaken for the price.
+ */
+function extractMrpValue(rawText) {
+  var text = normalizeText(rawText);
+
+  function normalizeOcrPriceNumber(value) {
+    return String(value || "")
+      .replace(/[Oo]/g, "0")
+      .replace(/[Il|]/g, "1")
+      .replace(/,/g, "")
+      .trim();
+  }
+
+  function formatMrp(currency, number) {
+    var cleanNumber = normalizeOcrPriceNumber(number);
+
+    if (!cleanNumber || !/^\d+(?:\.\d{1,2})?$/.test(cleanNumber)) {
+      return "";
+    }
+
+    var cleanCurrency = String(currency || "").trim();
+
+    if (/^inr$/i.test(cleanCurrency)) {
+      return "INR " + cleanNumber;
+    }
+
+    if (/^rs\.?$/i.test(cleanCurrency)) {
+      return "Rs. " + cleanNumber;
+    }
+
+    /*
+     * If OCR drops/misreads the rupee sign but clearly reads an MRP label,
+     * normalize the extracted Indian MRP value with ₹ so the downstream
+     * field validator receives a complete price expression.
+     */
+    return "₹ " + cleanNumber;
+  }
+
+  var lines = text
+    .split("\n")
+    .map(function (line) {
+      return line.trim();
+    })
+    .filter(Boolean);
+
+  var mrpLabelPattern =
+    /(?:\bm\s*\.?\s*r\s*\.?\s*p\.?\b|\bmaximum\s+retail\s+price\b|\bmax\.?\s+retail\s+price\b|\bretail\s+sale\s+price\b)/i;
+
+  var pricePattern =
+    /(?:^|[\s:=\-])((?:₹|rs\.?|inr)?)\s*[₹₹]?\s*([0-9OIl|]{1,6}(?:[.,][0-9OIl|]{1,2})?)(?=\s|$|\)|\/|-)/i;
+
+  for (var index = 0; index < lines.length; index += 1) {
+    var line = lines[index];
+    var labelMatch = line.match(mrpLabelPattern);
+
+    if (!labelMatch) {
+      continue;
+    }
+
+    var tail = line.slice(
+      (labelMatch.index || 0) + labelMatch[0].length
+    );
+
+    var sameLinePrice = tail.match(pricePattern);
+
+    if (sameLinePrice) {
+      return formatMrp(sameLinePrice[1], sameLinePrice[2]);
+    }
+
+    /*
+     * OCR sometimes places the price on the next line.
+     * Only inspect a short next-line value and reject obvious date,
+     * batch, weight or nutrition lines.
+     */
+    var nextLine = lines[index + 1] || "";
+
+    if (
+      nextLine &&
+      !/(?:mfg|mfd|manufact|packed|use\s*by|best\s*before|exp|batch|net\s*(?:wt|weight|qty|quantity)|kcal|protein|fat|sodium|carbohydrate)/i.test(
+        nextLine
+      )
+    ) {
+      var nextLinePrice = nextLine.match(pricePattern);
+
+      if (nextLinePrice) {
+        return formatMrp(nextLinePrice[1], nextLinePrice[2]);
+      }
+    }
+  }
+
+  return "";
+}
+
 function extractFields(rawText) {
   var text = normalizeText(rawText);
   var lower = text.toLowerCase();
@@ -827,11 +925,7 @@ function extractFields(rawText) {
       ])
     ),
 
-    mrp: cleanExtractedValue(
-      findMatch(text, [
-        /(?:mrp|maximum retail price)\s*[:\-]?\s*((?:₹|rs\.?|inr)?\s*[\d,]+(?:\.\d{1,2})?)/i,
-      ])
-    ),
+    mrp: extractMrpValue(text),
 
     consumerCare: cleanExtractedValue(
       findMatch(text, [
